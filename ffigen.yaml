@@ -1,0 +1,30 @@
+name: 'CryptoBindings'
+description: 'Bindings for Argon2 and SHA3'
+
+output: 'lib/generated/crypto_bindings.dart'
+
+headers:
+  entry-points:
+    - 'native_libs/argon2.h'
+    - 'native_libs/sha3.h'
+  include-directives:
+    - '**argon2.h'
+    - '**sha3.h'
+
+functions:
+  include:
+    - 'argon2id_hash_raw'
+    - 'argon2id_hash_raw_wrapper'
+    - 'sha3_512_init'
+    - 'sha3_512_update'
+    - 'sha3_512_final'
+
+structs:
+  include:
+    - 'SHA3_CTX'
+
+compiler-opts:
+  - '-I./native_libs'
+
+preamble: |
+  import 'dart:ffi';

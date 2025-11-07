@@ -1,0 +1,35 @@
+name: secret_app
+description: "A new Flutter project."
+publish_to: 'none'
+
+version: 1.0.0+1
+
+environment:
+  sdk: ">=3.0.0 <4.0.0"
+
+dependencies:
+  flutter:
+    sdk: flutter
+  flutter_dotenv: ^5.1.0
+  supabase_flutter: ^2.1.1
+  http: ^1.1.0
+  logger: ^1.4.0
+  shared_preferences: ^2.2.2
+  provider: ^6.1.1
+  encrypt: ^5.0.1
+  crypto: ^3.0.3
+  ffi: ^2.1.2
+  path: ^1.9.0
+  cupertino_icons: ^1.0.8
+  pointycastle: ^3.7.3
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  flutter_lints: ^5.0.0
+  # HAPUS ffigen - kita akan gunakan manual binding
+
+flutter:
+  uses-material-design: true
+  assets:
+    - .env
