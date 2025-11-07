@@ -72,7 +72,7 @@ class _MyAppState extends State<MyApp> {
       await _authProvider.initialize();
 
       // Initialize encrypted database tables
-      await _supabaseService.initializeEncryptedTables();
+      // await _supabaseService.initializeEncryptedTables();
 
       if (kDebugMode) {
         debugPrint('✅ App initialization completed');

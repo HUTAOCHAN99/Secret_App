@@ -1,21 +1,16 @@
-// lib/services/camellia_encryption.dart
 import 'dart:convert';
 import 'dart:math';
 import 'dart:typed_data';
 import 'package:flutter/foundation.dart';
-
-/// Implementasi Camellia-256 Encryption untuk database
 class CamelliaEncryption {
   static final CamelliaEncryption _instance = CamelliaEncryption._internal();
   factory CamelliaEncryption() => _instance;
   CamelliaEncryption._internal();
 
-  // Constants
-  static const int _blockSize = 16; // 128-bit blocks
-  static const int _keySize = 32; // 256-bit key
-  static const int _ivSize = 16; // 128-bit IV
+  static const int _blockSize = 16; 
+  static const int _keySize = 32; 
+  static const int _ivSize = 16; 
 
-  // Camellia S-Boxes (simplified untuk demonstrasi)
   final List<List<int>> _sBox1 = _generateSBox(0xA09E667F);
   final List<List<int>> _sBox2 = _generateSBox(0xB67AE858);
   final List<List<int>> _sBox3 = _generateSBox(0xC6EF372F);
@@ -33,13 +28,11 @@ class CamelliaEncryption {
     return sbox;
   }
 
-  /// Generate key untuk Camellia-256 dari string password
   Uint8List generateKey(String password) {
     try {
       final bytes = utf8.encode(password);
       var hash = _sha256Like(bytes);
       
-      // Expand to 256-bit key jika diperlukan
       while (hash.length < _keySize) {
         hash = Uint8List.fromList([...hash, ..._sha256Like(hash)]);
       }
@@ -53,7 +46,6 @@ class CamelliaEncryption {
     }
   }
 
-  /// Encrypt data menggunakan Camellia-256 dalam mode CBC
   Future<Map<String, dynamic>> encrypt(String plaintext, Uint8List key) async {
     try {
       if (kDebugMode) {

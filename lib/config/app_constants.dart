@@ -21,7 +21,6 @@ class AppConstants {
   static const String appName = 'Secret Chat';
   static const String appVersion = '1.0.0';
 
-  // Helper method untuk debug info
   static Map<String, dynamic> get debugInfo {
     return {
       'app_name': appName,

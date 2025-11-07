@@ -119,7 +119,6 @@ class VerifyScreenState extends State<VerifyScreen> {
             children: [
               const SizedBox(height: 40),
               
-              // Header Icon
               const Icon(
                 Icons.verified_user_outlined,
                 size: 80,
@@ -127,7 +126,6 @@ class VerifyScreenState extends State<VerifyScreen> {
               ),
               const SizedBox(height: 20),
               
-              // Title
               const Text(
                 'Verify Your Email',
                 textAlign: TextAlign.center,
@@ -139,7 +137,6 @@ class VerifyScreenState extends State<VerifyScreen> {
               ),
               const SizedBox(height: 16),
               
-              // Instructions
               const Text(
                 'We sent a 6-digit verification code to your email address.',
                 textAlign: TextAlign.center,
@@ -160,7 +157,6 @@ class VerifyScreenState extends State<VerifyScreen> {
               ),
               const SizedBox(height: 32),
 
-              // User Info Card
               Card(
                 elevation: 2,
                 child: Padding(
@@ -203,7 +199,6 @@ class VerifyScreenState extends State<VerifyScreen> {
               ),
               const SizedBox(height: 32),
               
-              // OTP Input
               TextFormField(
                 controller: _codeController,
                 decoration: const InputDecoration(
@@ -226,7 +221,6 @@ class VerifyScreenState extends State<VerifyScreen> {
               ),
               const SizedBox(height: 8),
               
-              // Code hint
               Text(
                 'Enter the 6-digit code from your email',
                 style: TextStyle(
@@ -237,7 +231,6 @@ class VerifyScreenState extends State<VerifyScreen> {
               ),
               const SizedBox(height: 32),
 
-              // Verify Button
               authProvider.isLoading
                   ? const Column(
                       children: [
@@ -267,7 +260,6 @@ class VerifyScreenState extends State<VerifyScreen> {
               
               const SizedBox(height: 20),
               
-              // Resend Code Section
               const Divider(),
               const SizedBox(height: 16),
               

@@ -17,11 +17,9 @@ class AuthProvider with ChangeNotifier {
   String? _error;
   bool _isInitialized = false;
   
-  // Crypto services
   late final dynamic _cryptoService;
   bool _useArgon2 = false;
 
-  // Context untuk snackbar
   BuildContext? _context;
   
   void setContext(BuildContext context) {
@@ -50,14 +48,11 @@ class AuthProvider with ChangeNotifier {
       }
       _setLoading(true);
 
-      // Initialize crypto services
       _initializeCrypto();
 
-      // Initialize Supabase
       await SupabaseConfig.initialize();
 
       if (SupabaseConfig.isAvailable) {
-        // Set initial user dari Supabase
         final supabaseService = SupabaseService();
         _user = supabaseService.currentUser;
 
@@ -72,7 +67,6 @@ class AuthProvider with ChangeNotifier {
           }
         }
 
-        // Setup auth state listener
         _setupAuthListener();
       } else {
         if (kDebugMode) {
@@ -96,8 +90,7 @@ class AuthProvider with ChangeNotifier {
   void _initializeCrypto() {
     try {
       _cryptoService = CryptoServiceFactory.getCryptoService();
-      
-      // Cek jika service adalah CryptoAuthFFI dan available
+
       _useArgon2 = _cryptoService is CryptoAuthFFI && _cryptoService.isAvailable;
       
       if (kDebugMode) {
@@ -167,7 +160,6 @@ class AuthProvider with ChangeNotifier {
         debugPrint('   🔧 Crypto Engine: ${engineInfo['algorithm']}');
       }
 
-      // 1. Validate password strength
       final passwordStrength = _validatePasswordStrength(password);
       if (!passwordStrength.isValid) {
         throw Exception('Password too weak: ${passwordStrength.issues.join(', ')}');
@@ -177,14 +169,12 @@ class AuthProvider with ChangeNotifier {
         debugPrint('✅ Password strength: ${passwordStrength.strength} (Score: ${passwordStrength.score}/${passwordStrength.maxScore})');
       }
 
-      // 2. Generate hybrid authentication hash
       final challenge = _generateRegistrationChallenge(email, displayName);
       final authData = await _performRegistrationAuth(
         password: password,
         challenge: challenge,
       );
 
-      // 3. Continue with Supabase registration
       if (!SupabaseConfig.isAvailable) {
         throw Exception('Supabase not configured. Please check your .env file');
       }
@@ -213,7 +203,6 @@ class AuthProvider with ChangeNotifier {
         throw Exception('Registration failed - user PIN is null or empty');
       }
 
-      // Update user state
       _user = supabaseService.currentUser;
       _userPin = userPin;
       _displayName = displayName;
@@ -251,7 +240,6 @@ class AuthProvider with ChangeNotifier {
     }
   }
 
-  /// Perform hybrid authentication dengan engine yang sesuai
   Future<dynamic> _performHybridAuthentication({
     required String password,
     required String challenge,
@@ -260,7 +248,7 @@ class AuthProvider with ChangeNotifier {
   }) async {
     try {
       if (_useArgon2) {
-        // Gunakan Argon2id + SHA3-512 via FFI
+
         return await _cryptoService.hybridAuthenticate(
           password: password,
           challenge: challenge,
@@ -268,7 +256,6 @@ class AuthProvider with ChangeNotifier {
           storedSalt: storedSalt,
         );
       } else {
-        // Gunakan PBKDF2-like fallback
         return await _cryptoService.hybridAuthenticate(
           password: password,
           challenge: challenge,
@@ -280,7 +267,7 @@ class AuthProvider with ChangeNotifier {
       if (kDebugMode) {
         debugPrint('❌ Hybrid auth failed, using Dart fallback: $e');
       }
-      // Fallback ke service Dart
+
       final fallbackService = CryptoAuthService();
       return await fallbackService.hybridAuthenticate(
         password: password,
@@ -306,7 +293,6 @@ class AuthProvider with ChangeNotifier {
         throw Exception('Supabase not configured. Please check your .env file');
       }
 
-      // 1. Check if user email is verified
       final supabaseService = SupabaseService();
       final isVerified = await supabaseService.isEmailVerified(email);
       
@@ -314,14 +300,12 @@ class AuthProvider with ChangeNotifier {
         throw Exception('Please verify your email first. Check your email for OTP code.');
       }
 
-      // 2. Get user auth data including password hash and salt
       final userAuthData = await supabaseService.getUserAuthData(email);
       
       if (userAuthData == null) {
         throw Exception('User not found or invalid credentials');
       }
 
-      // 3. Verify password with hybrid authentication (jika ada data crypto)
       if (userAuthData['password_hash'] != null && userAuthData['salt'] != null) {
         final challenge = _generateLoginChallenge();
         try {
@@ -340,11 +324,9 @@ class AuthProvider with ChangeNotifier {
             debugPrint('✅ Password verification successful with hybrid crypto auth');
           }
         } catch (e) {
-          // Fallback untuk user lama yang belum ada password_hash
           if (kDebugMode) {
             debugPrint('⚠️ Crypto auth failed, trying legacy login: $e');
           }
-          // Lanjut dengan login biasa tanpa crypto verification
         }
       } else {
         if (kDebugMode) {
@@ -352,7 +334,6 @@ class AuthProvider with ChangeNotifier {
         }
       }
 
-      // 4. Sign in dengan Supabase
       final response = await supabaseService.signIn(email, password);
 
       if (response.user != null) {
@@ -391,7 +372,6 @@ class AuthProvider with ChangeNotifier {
     }
   }
 
-  // Handle registration authentication
   Future<Map<String, dynamic>> _performRegistrationAuth({
     required String password,
     required String challenge,
@@ -410,7 +390,7 @@ class AuthProvider with ChangeNotifier {
       if (kDebugMode) {
         debugPrint('⚠️ Auth failed, using direct Dart service: $e');
       }
-      // Direct fallback ke Dart service
+
       final fallbackService = CryptoAuthService();
       final result = await fallbackService.hybridAuthenticate(
         password: password,
@@ -423,10 +403,6 @@ class AuthProvider with ChangeNotifier {
       };
     }
   }
-
-  // ===============================
-  // REAL OTP VERIFICATION METHODS
-  // ===============================
 
   Future<void> verify(String email, String otpCode) async {
     _setLoading(true);
@@ -443,14 +419,12 @@ class AuthProvider with ChangeNotifier {
 
       final supabaseService = SupabaseService();
       
-      // Verify OTP dengan Supabase
       final isValid = await supabaseService.verifyEmailOtp(email, otpCode);
 
       if (!isValid) {
         throw Exception('Invalid or expired OTP code');
       }
 
-      // Update user state
       await _loadUserProfile();
 
       if (kDebugMode) {
@@ -494,7 +468,6 @@ class AuthProvider with ChangeNotifier {
       _setLoading(false);
       notifyListeners();
 
-      // Show success message
       if (_mounted && _context != null) {
         ScaffoldMessenger.of(_context!).showSnackBar(
           SnackBar(
@@ -615,7 +588,6 @@ class AuthProvider with ChangeNotifier {
     return 'login_${_email}_$timestamp';
   }
 
-  // Password strength validation
   PasswordStrength _validatePasswordStrength(String password) {
     int score = 0;
     final issues = <String>[];
@@ -659,7 +631,6 @@ class AuthProvider with ChangeNotifier {
     );
   }
 
-  /// Test crypto functionality
   Future<void> testCryptoFunctions() async {
     try {
       if (kDebugMode) {
@@ -722,7 +693,6 @@ class AuthProvider with ChangeNotifier {
   }
 }
 
-// Password strength model
 class PasswordStrength {
   final int score;
   final String strength;

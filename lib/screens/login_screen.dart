@@ -5,7 +5,7 @@ import '../providers/auth_provider.dart';
 class LoginScreen extends StatefulWidget {
   const LoginScreen({super.key});
    @override
-  LoginScreenState createState() => LoginScreenState(); // Ganti dari _LoginScreenState
+  LoginScreenState createState() => LoginScreenState(); 
 }
 
 class LoginScreenState extends State<LoginScreen> {
@@ -22,7 +22,6 @@ class LoginScreenState extends State<LoginScreen> {
   }
 
   Future<void> _initializeScreen() async {
-    // Tunggu sebentar untuk memastikan context tersedia
     await Future.delayed(Duration(milliseconds: 100));
     
     final authProvider = Provider.of<AuthProvider>(context, listen: false);
@@ -30,7 +29,6 @@ class LoginScreenState extends State<LoginScreen> {
     
     print('🔐 LoginScreen - Current auth status: ${authProvider.isLoggedIn}');
     
-    // Jika sudah login, redirect ke chats
     if (authProvider.isLoggedIn && mounted) {
       print('🚀 User already logged in, redirecting to chats...');
       Navigator.pushReplacementNamed(context, '/chats');
@@ -58,7 +56,6 @@ class LoginScreenState extends State<LoginScreen> {
       print('   🔐 isLoggedIn: ${authProvider.isLoggedIn}');
       print('   👤 User: ${authProvider.email}');
       
-      // Beri waktu sebentar untuk state update
       await Future.delayed(Duration(milliseconds: 500));
       
       if (authProvider.isLoggedIn && mounted) {
@@ -195,7 +192,6 @@ class LoginScreenState extends State<LoginScreen> {
               ),
               SizedBox(height: 20),
 
-              // Password Field
               TextFormField(
                 controller: _passwordController,
                 decoration: InputDecoration(
@@ -268,7 +264,6 @@ class LoginScreenState extends State<LoginScreen> {
               ),
               SizedBox(height: 20),
 
-              // Debug Info (hanya di development)
               if (authProvider.isLoggedIn) ...[
                 Card(
                   color: Colors.orange[50],

@@ -22,12 +22,16 @@ dependencies:
   path: ^1.9.0
   cupertino_icons: ^1.0.8
   pointycastle: ^3.7.3
+  permission_handler: ^12.0.1
+  file_picker: ^10.3.3
+  archive: ^4.0.7
+  path_provider: ^2.1.5
+  image: ^4.5.4
 
 dev_dependencies:
   flutter_test:
     sdk: flutter
   flutter_lints: ^5.0.0
-  # HAPUS ffigen - kita akan gunakan manual binding
 
 flutter:
   uses-material-design: true

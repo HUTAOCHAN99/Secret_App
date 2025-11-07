@@ -58,7 +58,6 @@ class _RegisterScreenState extends State<RegisterScreen> {
         final otpCode = result['otp_code'];
         final userPin = result['user_pin'];
 
-        // Show OTP untuk development
         if (mounted) {
           ScaffoldMessenger.of(context).showSnackBar(
             SnackBar(
@@ -74,7 +73,6 @@ class _RegisterScreenState extends State<RegisterScreen> {
           print('📌 USER PIN: $userPin');
         }
 
-        // Navigate to verify screen
         if (mounted) {
           Navigator.pushNamed(
             context,
@@ -201,7 +199,6 @@ class _RegisterScreenState extends State<RegisterScreen> {
               ),
               const SizedBox(height: 32),
 
-              // Email Field
               TextFormField(
                 controller: _emailController,
                 decoration: const InputDecoration(
@@ -230,7 +227,6 @@ class _RegisterScreenState extends State<RegisterScreen> {
               ),
               const SizedBox(height: 16),
 
-              // Password Field
               TextFormField(
                 controller: _passwordController,
                 decoration: InputDecoration(
@@ -257,7 +253,6 @@ class _RegisterScreenState extends State<RegisterScreen> {
               ),
               const SizedBox(height: 16),
 
-              // Confirm Password Field
               TextFormField(
                 controller: _confirmPasswordController,
                 decoration: InputDecoration(
@@ -284,7 +279,6 @@ class _RegisterScreenState extends State<RegisterScreen> {
               ),
               const SizedBox(height: 32),
 
-              // Register Button
               authProvider.isLoading
                   ? const Center(
                       child: Column(
@@ -315,7 +309,6 @@ class _RegisterScreenState extends State<RegisterScreen> {
                     ),
               const SizedBox(height: 20),
 
-              // Login Link
               Row(
                 mainAxisAlignment: MainAxisAlignment.center,
                 children: [
@@ -332,7 +325,6 @@ class _RegisterScreenState extends State<RegisterScreen> {
                 ],
               ),
 
-              // Info Box untuk Development Mode
               Container(
                 margin: const EdgeInsets.only(top: 20),
                 padding: const EdgeInsets.all(16),

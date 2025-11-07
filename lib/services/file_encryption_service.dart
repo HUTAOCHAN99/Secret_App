@@ -2,7 +2,6 @@
 import 'dart:convert';
 import 'dart:io';
 import 'dart:math';
-import 'dart:typed_data';
 import 'package:crypto/crypto.dart';
 import 'package:flutter/foundation.dart';
 import 'package:path_provider/path_provider.dart';
@@ -15,7 +14,7 @@ class FileEncryptionService {
   // Constants
   static const int _keyLength = 32; // 256-bit key untuk ChaCha20
   static const int _nonceLength = 12; // 96-bit nonce untuk ChaCha20-Poly1305
-  static const int _hmacKeyLength = 64; // 512-bit key untuk HMAC-SHA512
+  static const int _hmacKeyLength = 32; // 256-bit key untuk HMAC-SHA512 (dikurangi dari 64)
   static const int _chunkSize = 4096; // 4KB chunks untuk streaming
 
   // ===============================
@@ -36,8 +35,8 @@ class FileEncryptionService {
         debugPrint('   Size: ${await file.length()} bytes');
       }
 
-      // Generate keys dari encryption key
-      final keys = _deriveKeys(encryptionKey, chatId);
+      // Generate keys dari encryption key - FIXED
+      final keys = _deriveKeysSafe(encryptionKey, chatId);
       final chachaKey = keys['chacha_key']!;
       final hmacKey = keys['hmac_key']!;
 
@@ -48,7 +47,7 @@ class FileEncryptionService {
       final fileStream = file.openRead();
       final encryptedBytes = <int>[];
       final hmac = Hmac(sha512, hmacKey);
-      var hmacDigest = hmac.convert([]); // Initialize HMAC
+      var hmacDigest = hmac.convert(Uint8List(0)); // Initialize HMAC
 
       int totalBytes = 0;
 
@@ -58,17 +57,17 @@ class FileEncryptionService {
         encryptedBytes.addAll(encryptedChunk);
 
         // Update HMAC dengan encrypted chunk
-        hmacDigest = hmac.convert([...hmacDigest.bytes, ...encryptedChunk]);
+        hmacDigest = hmac.convert(Uint8List.fromList([...hmacDigest.bytes, ...encryptedChunk]));
         
         totalBytes += chunk.length;
         
-        if (kDebugMode) {
-          debugPrint('   🔄 Encrypted chunk: ${chunk.length} bytes');
+        if (kDebugMode && totalBytes % (1024 * 1024) == 0) {
+          debugPrint('   🔄 Encrypted: ${totalBytes ~/ (1024 * 1024)} MB');
         }
       }
 
       // Generate authentication tag
-      final authTag = _generateAuthTag(hmacDigest.bytes, nonce, totalBytes);
+      final authTag = _generateAuthTag(Uint8List.fromList(encryptedBytes), hmacKey, nonce, totalBytes);
 
       final result = FileEncryptionResult(
         encryptedData: Uint8List.fromList(encryptedBytes),
@@ -110,8 +109,8 @@ class FileEncryptionService {
         debugPrint('🔓 Starting file decryption: ChaCha20-Poly1305 + HMAC-SHA512');
       }
 
-      // Generate keys dari encryption key
-      final keys = _deriveKeys(encryptionKey, chatId);
+      // Generate keys dari encryption key - FIXED
+      final keys = _deriveKeysSafe(encryptionKey, chatId);
       final chachaKey = keys['chacha_key']!;
       final hmacKey = keys['hmac_key']!;
 
@@ -135,7 +134,7 @@ class FileEncryptionService {
         totalBytes += decryptedChunk.length;
         
         if (kDebugMode && totalBytes % (1024 * 1024) == 0) {
-          debugPrint('   🔄 Decrypted: ${totalBytes ~/ 1024} KB');
+          debugPrint('   🔄 Decrypted: ${totalBytes ~/ (1024 * 1024)} MB');
         }
       }
 
@@ -154,11 +153,91 @@ class FileEncryptionService {
   }
 
   // ===============================
+  // KEY DERIVATION - FIXED VERSION
+  // ===============================
+
+  /// Safe key derivation dengan multiple fallbacks
+  Map<String, Uint8List> _deriveKeysSafe(String baseKey, String context) {
+    try {
+      // Method 1: Standard derivation
+      return _deriveKeysStandard(baseKey, context);
+    } catch (e) {
+      if (kDebugMode) {
+        debugPrint('⚠️ Standard key derivation failed, trying alternative...');
+      }
+      try {
+        // Method 2: Alternative derivation
+        return _deriveKeysAlternative(baseKey, context);
+      } catch (e) {
+        if (kDebugMode) {
+          debugPrint('⚠️ Alternative key derivation failed, using simple method...');
+        }
+        // Method 3: Simple fallback
+        return _deriveKeysSimple(baseKey, context);
+      }
+    }
+  }
+
+  /// Standard key derivation
+  Map<String, Uint8List> _deriveKeysStandard(String baseKey, String context) {
+    final keyMaterial = '$baseKey::$context::file_encryption_2024';
+    final hash = sha512.convert(utf8.encode(keyMaterial)).bytes;
+    
+    // Validasi panjang hash
+    if (hash.length < _keyLength + _hmacKeyLength) {
+      throw Exception('Hash length insufficient');
+    }
+    
+    return {
+      'chacha_key': Uint8List.fromList(hash.sublist(0, _keyLength)),
+      'hmac_key': Uint8List.fromList(hash.sublist(_keyLength, _keyLength + _hmacKeyLength)),
+    };
+  }
+
+  /// Alternative key derivation dengan multiple rounds
+  Map<String, Uint8List> _deriveKeysAlternative(String baseKey, String context) {
+    var keyMaterial = '$baseKey::$context::file_encryption_alt_2024';
+    var hash = sha512.convert(utf8.encode(keyMaterial)).bytes;
+    
+    // Multiple rounds untuk meningkatkan entropy
+    for (int i = 0; i < 100; i++) {
+      keyMaterial = base64.encode(hash) + '::round_$i';
+      hash = sha512.convert(utf8.encode(keyMaterial)).bytes;
+    }
+    
+    // Extend jika diperlukan
+    if (hash.length < _keyLength + _hmacKeyLength) {
+      final extendedHash = [...hash, ...sha512.convert(hash).bytes];
+      return {
+        'chacha_key': Uint8List.fromList(extendedHash.sublist(0, _keyLength)),
+        'hmac_key': Uint8List.fromList(extendedHash.sublist(_keyLength, _keyLength + _hmacKeyLength)),
+      };
+    }
+    
+    return {
+      'chacha_key': Uint8List.fromList(hash.sublist(0, _keyLength)),
+      'hmac_key': Uint8List.fromList(hash.sublist(_keyLength, _keyLength + _hmacKeyLength)),
+    };
+  }
+
+  /// Simple key derivation sebagai fallback
+  Map<String, Uint8List> _deriveKeysSimple(String baseKey, String context) {
+    final combined = utf8.encode('$baseKey::$context');
+    final chachaKey = sha256.convert([...combined, ...utf8.encode('chacha')]).bytes;
+    final hmacKey = sha256.convert([...combined, ...utf8.encode('hmac')]).bytes;
+    
+    return {
+      'chacha_key': Uint8List.fromList(chachaKey.sublist(0, _keyLength)),
+      'hmac_key': Uint8List.fromList(hmacKey.sublist(0, _hmacKeyLength)),
+    };
+  }
+
+  // ===============================
   // CHACHA20-POLY1305 IMPLEMENTATION
   // ===============================
 
   /// ChaCha20 encryption untuk single chunk
-  Uint8List _chacha20EncryptChunk(Uint8List data, Uint8List key, Uint8List nonce, int counter) {
+  Uint8List _chacha20EncryptChunk(List<int> data, Uint8List key, Uint8List nonce, int counter) {
     final result = Uint8List(data.length);
     final keyStream = _generateChaCha20KeyStream(key, nonce, counter ~/ 64, data.length);
     
@@ -171,7 +250,6 @@ class FileEncryptionService {
 
   /// ChaCha20 decryption untuk single chunk
   Uint8List _chacha20DecryptChunk(Uint8List data, Uint8List key, Uint8List nonce, int counter) {
-    // Decryption sama dengan encryption untuk stream cipher
     return _chacha20EncryptChunk(data, key, nonce, counter);
   }
 
@@ -255,41 +333,20 @@ class FileEncryptionService {
   // ===============================
 
   /// Generate HMAC-SHA512 authentication tag
-  Uint8List _generateAuthTag(Uint8List data, Uint8List nonce, int fileSize) {
-    final hmac = Hmac(sha512, _deriveHmacKey(data));
+  Uint8List _generateAuthTag(Uint8List data, Uint8List hmacKey, Uint8List nonce, int fileSize) {
+    final hmac = Hmac(sha512, hmacKey);
     
     // Include nonce dan file size dalam HMAC calculation
     final hmacData = Uint8List.fromList([...nonce, ..._intToBytes(fileSize), ...data]);
     final digest = hmac.convert(hmacData);
     
-    return digest.bytes;
+    return Uint8List.fromList(digest.bytes);
   }
 
   /// Verify HMAC authentication
   bool _verifyHmac(Uint8List data, Uint8List hmacKey, Uint8List nonce, Uint8List authTag, int fileSize) {
-    final expectedHmac = _generateAuthTag(data, nonce, fileSize);
+    final expectedHmac = _generateAuthTag(data, hmacKey, nonce, fileSize);
     return _constantTimeCompare(expectedHmac, authTag);
-  }
-
-  // ===============================
-  // KEY DERIVATION
-  // ===============================
-
-  /// Derive encryption keys dari base key
-  Map<String, Uint8List> _deriveKeys(String baseKey, String context) {
-    final keyMaterial = '$baseKey::$context::file_encryption_2024';
-    final hash = sha512.convert(utf8.encode(keyMaterial)).bytes;
-    
-    return {
-      'chacha_key': Uint8List.fromList(hash.sublist(0, _keyLength)),
-      'hmac_key': Uint8List.fromList(hash.sublist(_keyLength, _keyLength + _hmacKeyLength)),
-    };
-  }
-
-  /// Derive HMAC key dari data
-  Uint8List _deriveHmacKey(Uint8List data) {
-    final hash = sha512.convert(data).bytes;
-    return Uint8List.fromList(hash.sublist(0, _hmacKeyLength));
   }
 
   // ===============================
@@ -364,6 +421,8 @@ class FileEncryptionService {
       'txt': 'text/plain',
       'mp4': 'video/mp4',
       'mp3': 'audio/mpeg',
+      'zip': 'application/zip',
+      'rar': 'application/x-rar-compressed',
     };
     
     return mimeTypes[extension] ?? 'application/octet-stream';
@@ -393,14 +452,6 @@ class FileEncryptionService {
       }
       rethrow;
     }
-  }
-
-  /// Get file size dalam format readable
-  String _formatFileSize(int bytes) {
-    if (bytes <= 0) return "0 B";
-    const suffixes = ["B", "KB", "MB", "GB"];
-    final i = (log(bytes) / log(1024)).floor();
-    return '${(bytes / pow(1024, i)).toStringAsFixed(2)} ${suffixes[i]}';
   }
 
   // ===============================
@@ -471,15 +522,16 @@ class FileEncryptionService {
     return {
       'algorithm': 'ChaCha20-Poly1305 + HMAC-SHA512',
       'security_level': 'Military Grade',
-      'key_strength': '256-bit (ChaCha20) + 512-bit (HMAC)',
+      'key_strength': '256-bit (ChaCha20) + 256-bit (HMAC)',
       'authentication': 'HMAC-SHA512 with authentication tag',
       'nonce_size': '96-bit (12 bytes)',
+      'key_derivation': 'SHA-512 with multiple fallbacks',
       'advantages': [
         'High-speed encryption suitable for large files',
         'Strong authentication dengan HMAC-SHA512',
         'Resistant to cryptanalysis attacks',
         'Authenticated encryption dengan Poly1305',
-        'Secure key derivation',
+        'Secure key derivation dengan multiple fallbacks',
       ],
       'recommendations': [
         'Use unique nonce untuk setiap file',
@@ -500,6 +552,7 @@ Security Level: ${analysis['security_level']}
 Key Strength: ${analysis['key_strength']}
 Authentication: ${analysis['authentication']}
 Nonce Size: ${analysis['nonce_size']}
+Key Derivation: ${analysis['key_derivation']}
 
 Advantages:
 ${analysis['advantages'].map((adv) => '  • $adv').join('\n')}
@@ -510,6 +563,7 @@ Security Features:
   ✓ ChaCha20 stream cipher
   ✓ Large file support
   ✓ Streaming encryption/decryption
+  ✓ Multiple key derivation fallbacks
 =====================================''');
     }
   }

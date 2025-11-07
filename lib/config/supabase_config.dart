@@ -14,12 +14,10 @@ class SupabaseConfig {
 
   static Future<void> initialize() async {
     try {
-      // Validasi environment variables sebelum initialize
       _validateEnvironment();
 
       _isConfigured = true;
 
-      // Initialize Supabase dengan constants
       await Supabase.initialize(
         url: AppConstants.supabaseUrl,
         anonKey: AppConstants.supabaseAnonKey,
@@ -43,7 +41,6 @@ class SupabaseConfig {
 
   static void _validateEnvironment() {
     try {
-      // Ini akan memanggil validasi di AppConstants
       final url = AppConstants.supabaseUrl;
       final key = AppConstants.supabaseAnonKey;
       

@@ -1,17 +1,19 @@
 // secret_app/lib/services/supabase_service.dart
-import 'dart:convert';
+import 'dart:io';
 import 'dart:math';
 import 'package:flutter/foundation.dart';
+import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
+import 'package:file_picker/file_picker.dart';
+import 'package:path_provider/path_provider.dart';
+import 'package:image/image.dart' as img;
+import 'package:archive/archive.dart';
 import '../config/supabase_config.dart';
-import 'encryption_service.dart';
 
 class SupabaseService {
   static final SupabaseService _instance = SupabaseService._internal();
   factory SupabaseService() => _instance;
   SupabaseService._internal();
-
-  final EncryptionService _encryption = EncryptionService();
 
   bool get isAvailable =>
       SupabaseConfig.isConfigured && SupabaseConfig.isInitialized;
@@ -33,10 +35,477 @@ class SupabaseService {
   }
 
   // ===============================
-  // REAL OTP VERIFICATION METHODS
+  // FILE PICKER & STORAGE METHODS
   // ===============================
 
-  /// Verify OTP code yang dikirim Supabase via email
+  /// Pick file dari device
+  Future<FilePickerResult?> pickFileWithLocation() async {
+    try {
+      final result = await FilePicker.platform.pickFiles(
+        type: FileType.any,
+        allowMultiple: false,
+        withData: true,
+      );
+
+      if (result != null && result.files.isNotEmpty) {
+        final platformFile = result.files.first;
+        if (kDebugMode) {
+          debugPrint('📁 File picked: ${platformFile.name}');
+          debugPrint('   Size: ${platformFile.size} bytes');
+          debugPrint('   Has data: ${platformFile.bytes != null}');
+        }
+      }
+
+      return result;
+    } catch (e) {
+      if (kDebugMode) {
+        debugPrint('❌ File picker error: $e');
+      }
+      return null;
+    }
+  }
+
+  /// Save file ke device
+  Future<File> saveFileToLocation({
+    required Uint8List data,
+    required String fileName,
+    required String locationType,
+  }) async {
+    try {
+      final tempDir = await getTemporaryDirectory();
+      final savePath = '${tempDir.path}/$fileName';
+      final file = File(savePath);
+      
+      await file.writeAsBytes(data);
+      
+      if (kDebugMode) {
+        debugPrint('💾 File saved to: $savePath');
+      }
+      
+      return file;
+    } catch (e) {
+      if (kDebugMode) {
+        debugPrint('❌ Error saving file: $e');
+      }
+      final tempFile = File('${await getTemporaryDirectory()}/temp_$fileName');
+      await tempFile.writeAsBytes(data);
+      return tempFile;
+    }
+  }
+
+  /// Download file dan simpan
+  Future<File> downloadAndSaveFile({
+    required String filePath,
+    required String fileName,
+    required String locationType,
+  }) async {
+    try {
+      final fileData = await downloadEncryptedFile(filePath);
+      return await saveFileToLocation(
+        data: fileData,
+        fileName: fileName,
+        locationType: locationType,
+      );
+    } catch (e) {
+      if (kDebugMode) {
+        debugPrint('❌ Error downloading and saving file: $e');
+      }
+      rethrow;
+    }
+  }
+
+  // ===============================
+  // FILE COMPRESSION & PROCESSING
+  // ===============================
+
+  /// Compress image dengan quality adjustment
+  Future<Uint8List> compressImage(Uint8List imageData, {int quality = 80}) async {
+    try {
+      if (kDebugMode) {
+        debugPrint('🖼️ Compressing image with quality: $quality%');
+      }
+
+      final image = img.decodeImage(imageData);
+      if (image == null) {
+        throw Exception('Cannot decode image');
+      }
+
+      // Resize jika terlalu besar (max width 1200px)
+      final resizedImage = image.width > 1200 
+          ? img.copyResize(image, width: 1200)
+          : image;
+
+      // Encode dengan quality setting
+      final compressedData = img.encodeJpg(resizedImage, quality: quality);
+
+      if (kDebugMode) {
+        final originalSize = imageData.length;
+        final compressedSize = compressedData.length;
+        final compressionRatio = ((originalSize - compressedSize) / originalSize * 100).round();
+        debugPrint('✅ Image compressed: $originalSize → $compressedSize bytes ($compressionRatio% reduction)');
+      }
+
+      return Uint8List.fromList(compressedData);
+    } catch (e) {
+      if (kDebugMode) {
+        debugPrint('❌ Image compression error: $e');
+      }
+      return imageData;
+    }
+  }
+
+  /// Compress text file dengan gzip
+  Future<Uint8List> compressTextFile(Uint8List textData) async {
+    try {
+      if (kDebugMode) {
+        debugPrint('📝 Compressing text file...');
+      }
+
+      final compressed = GZipEncoder().encode(textData);
+      if (compressed == null) {
+        return textData;
+      }
+
+      if (kDebugMode) {
+        final originalSize = textData.length;
+        final compressedSize = compressed.length;
+        final compressionRatio = ((originalSize - compressedSize) / originalSize * 100).round();
+        debugPrint('✅ Text compressed: $originalSize → $compressedSize bytes ($compressionRatio% reduction)');
+      }
+
+      return Uint8List.fromList(compressed);
+    } catch (e) {
+      if (kDebugMode) {
+        debugPrint('❌ Text compression error: $e');
+      }
+      return textData;
+    }
+  }
+
+  /// Create zip archive dari multiple files
+  Future<Uint8List> createZipArchive(Map<String, Uint8List> files) async {
+    try {
+      if (kDebugMode) {
+        debugPrint('🗜️ Creating ZIP archive with ${files.length} files');
+      }
+
+      final archive = Archive();
+      
+      for (final entry in files.entries) {
+        final fileName = entry.key;
+        final fileData = entry.value;
+        
+        archive.addFile(ArchiveFile(fileName, fileData.length, fileData));
+      }
+
+      final zipData = ZipEncoder().encode(archive);
+      if (zipData == null) {
+        throw Exception('Failed to create ZIP archive');
+      }
+
+      if (kDebugMode) {
+        debugPrint('✅ ZIP archive created: ${zipData.length} bytes');
+      }
+
+      return Uint8List.fromList(zipData);
+    } catch (e) {
+      if (kDebugMode) {
+        debugPrint('❌ ZIP creation error: $e');
+      }
+      rethrow;
+    }
+  }
+
+  /// Process file berdasarkan type (compression, resize, dll)
+  Future<FileProcessingResult> processFile({
+    required Uint8List fileData,
+    required String fileName,
+    required String mimeType,
+  }) async {
+    try {
+      if (kDebugMode) {
+        debugPrint('🔄 Processing file: $fileName ($mimeType)');
+      }
+
+      Uint8List processedData = fileData;
+      bool isCompressed = false;
+      String compressionInfo = '';
+
+      // Process berdasarkan file type
+      if (mimeType.startsWith('image/')) {
+        // Compress image
+        final originalSize = fileData.length;
+        processedData = await compressImage(fileData);
+        final compressedSize = processedData.length;
+        
+        if (compressedSize < originalSize) {
+          isCompressed = true;
+          compressionInfo = 'Image compressed ${(originalSize - compressedSize) ~/ 1024}KB saved';
+        }
+      }
+      else if (mimeType == 'text/plain' || fileName.endsWith('.txt')) {
+        // Compress text files
+        final originalSize = fileData.length;
+        processedData = await compressTextFile(fileData);
+        final compressedSize = processedData.length;
+        
+        if (compressedSize < originalSize) {
+          isCompressed = true;
+          compressionInfo = 'Text compressed ${(originalSize - compressedSize) ~/ 1024}KB saved';
+        }
+      }
+      else if (mimeType.contains('pdf') || 
+               mimeType.contains('document') ||
+               fileName.endsWith('.doc') ||
+               fileName.endsWith('.docx')) {
+        // Documents - no compression (usually already compressed)
+        compressionInfo = 'Document file';
+      }
+      else {
+        // Other files - no processing
+        compressionInfo = 'Binary file';
+      }
+
+      if (kDebugMode) {
+        debugPrint('✅ File processing completed: $compressionInfo');
+      }
+
+      return FileProcessingResult(
+        data: processedData,
+        mimeType: mimeType,
+        fileName: fileName,
+        isCompressed: isCompressed,
+        compressionInfo: compressionInfo,
+        originalSize: fileData.length,
+        processedSize: processedData.length,
+      );
+    } catch (e) {
+      if (kDebugMode) {
+        debugPrint('❌ File processing error: $e');
+      }
+      return FileProcessingResult(
+        data: fileData,
+        mimeType: mimeType,
+        fileName: fileName,
+        isCompressed: false,
+        compressionInfo: 'Processing failed - using original',
+        originalSize: fileData.length,
+        processedSize: fileData.length,
+      );
+    }
+  }
+
+  /// Get file info untuk display
+  Map<String, dynamic> getFileInfo(String fileName, int fileSize, String mimeType) {
+    final fileExtension = fileName.toLowerCase().split('.').last;
+    
+    // File type categories
+    final imageTypes = ['jpg', 'jpeg', 'png', 'gif', 'bmp', 'webp'];
+    final documentTypes = ['pdf', 'doc', 'docx', 'txt', 'rtf'];
+    final videoTypes = ['mp4', 'avi', 'mov', 'wmv', 'flv'];
+    final audioTypes = ['mp3', 'wav', 'aac', 'flac'];
+    final archiveTypes = ['zip', 'rar', '7z', 'tar', 'gz'];
+    
+    String fileCategory;
+    IconData fileIcon;
+    Color fileColor;
+    
+    if (imageTypes.contains(fileExtension)) {
+      fileCategory = 'Image';
+      fileIcon = Icons.image;
+      fileColor = Colors.green;
+    } else if (documentTypes.contains(fileExtension)) {
+      fileCategory = 'Document';
+      fileIcon = Icons.description;
+      fileColor = Colors.blue;
+    } else if (videoTypes.contains(fileExtension)) {
+      fileCategory = 'Video';
+      fileIcon = Icons.videocam;
+      fileColor = Colors.red;
+    } else if (audioTypes.contains(fileExtension)) {
+      fileCategory = 'Audio';
+      fileIcon = Icons.audiotrack;
+      fileColor = Colors.orange;
+    } else if (archiveTypes.contains(fileExtension)) {
+      fileCategory = 'Archive';
+      fileIcon = Icons.folder_zip;
+      fileColor = Colors.purple;
+    } else {
+      fileCategory = 'File';
+      fileIcon = Icons.insert_drive_file;
+      fileColor = Colors.grey;
+    }
+    
+    return {
+      'category': fileCategory,
+      'icon': fileIcon,
+      'color': fileColor,
+      'extension': fileExtension.toUpperCase(),
+      'size_formatted': _formatFileSize(fileSize),
+    };
+  }
+
+  String _formatFileSize(int bytes) {
+    if (bytes <= 0) return "0 B";
+    const suffixes = ["B", "KB", "MB", "GB"];
+    final i = (log(bytes) / log(1024)).floor();
+    return '${(bytes / pow(1024, i)).toStringAsFixed(1)} ${suffixes[i]}';
+  }
+
+
+Future<String> uploadEncryptedFile({
+  required Uint8List fileData,
+  required String fileName,
+  required String chatId,
+  required String mimeType,
+}) async {
+  if (!isAvailable) {
+    throw Exception('Supabase not available');
+  }
+
+  try {
+    if (kDebugMode) {
+      debugPrint('📤 Uploading encrypted file: $fileName');
+    }
+
+    final filePath = '${DateTime.now().millisecondsSinceEpoch}_$fileName';
+    
+    // ✅ Gunakan bucket 'encrypted_files'
+    await client.storage
+        .from('encrypted_files')
+        .uploadBinary(filePath, fileData);
+
+    if (kDebugMode) {
+      debugPrint('✅ File uploaded successfully: $filePath');
+    }
+
+    return filePath;
+  } catch (e) {
+    if (kDebugMode) {
+      debugPrint('❌ File upload error: $e');
+    }
+    
+    // Fallback ke local storage
+    final localFile = await saveFileToLocation(
+      data: fileData,
+      fileName: fileName,
+      locationType: 'temp',
+    );
+    
+    return 'local://${localFile.path}';
+  }
+}
+
+/// Download encrypted file - PERBAIKAN
+Future<Uint8List> downloadEncryptedFile(String filePath) async {
+  if (!isAvailable) {
+    throw Exception('Supabase not available');
+  }
+
+  try {
+    if (kDebugMode) {
+      debugPrint('📥 Downloading encrypted file: $filePath');
+    }
+
+    if (filePath.startsWith('local://')) {
+      final localPath = filePath.replaceFirst('local://', '');
+      final file = File(localPath);
+      if (await file.exists()) {
+        return await file.readAsBytes();
+      } else {
+        throw Exception('Local file not found: $localPath');
+      }
+    }
+
+    // ✅ Gunakan bucket 'encrypted_files'
+    final response = await client.storage
+        .from('encrypted_files')
+        .download(filePath);
+
+    if (kDebugMode) {
+      debugPrint('✅ File downloaded successfully: ${response.length} bytes');
+    }
+
+    return response;
+  } catch (e) {
+    if (kDebugMode) {
+      debugPrint('❌ File download error: $e');
+    }
+    return Uint8List(0);
+  }
+}
+
+  /// Save file message ke database
+  Future<Map<String, dynamic>> sendFileMessage({
+    required String chatId,
+    required String senderId,
+    required String filePath,
+    required String fileName,
+    required int fileSize,
+    required String mimeType,
+    required String nonce,
+    required String authTag,
+  }) async {
+    final result = await insertData('file_messages', {
+      'chat_id': chatId,
+      'sender_id': senderId,
+      'file_path': filePath,
+      'file_name': fileName,
+      'file_size': fileSize,
+      'mime_type': mimeType,
+      'nonce': nonce,
+      'auth_tag': authTag,
+      'algorithm': 'chacha20-poly1305-hmac-sha512',
+      'created_at': DateTime.now().toIso8601String(),
+    });
+
+    return result ?? {};
+  }
+
+  /// Get file messages untuk chat
+  Future<List<Map<String, dynamic>>> getFileMessages(String chatId) async {
+    return await fetchData('file_messages', filters: {'chat_id': chatId});
+  }
+
+  /// Stream file messages real-time
+  Stream<List<Map<String, dynamic>>> subscribeToFileMessages(String chatId) {
+    if (!isAvailable) {
+      return const Stream.empty();
+    }
+
+    return client
+        .from('file_messages')
+        .stream(primaryKey: ['id'])
+        .eq('chat_id', chatId)
+        .map(
+          (event) => event.map((item) => Map<String, dynamic>.from(item)).toList(),
+        );
+  }
+
+  /// Delete file message
+  Future<void> deleteFileMessage(String messageId, String filePath) async {
+    if (!isAvailable) {
+      return;
+    }
+
+    try {
+      await client.from('file_messages').delete().eq('id', messageId);
+      
+      if (kDebugMode) {
+        debugPrint('✅ File message deleted from database: $messageId');
+      }
+    } catch (e) {
+      if (kDebugMode) {
+        debugPrint('❌ Error deleting file message: $e');
+      }
+    }
+  }
+
+  // ===============================
+  // OTP VERIFICATION METHODS
+  // ===============================
+
+  /// Verify OTP code
   Future<bool> verifyEmailOtp(String email, String otpCode) async {
     if (!isAvailable) {
       throw Exception('Supabase not available');
@@ -47,7 +516,6 @@ class SupabaseService {
         debugPrint('🔍 Verifying OTP: $email -> $otpCode');
       }
 
-      // Verify OTP menggunakan Supabase Auth
       final response = await client.auth.verifyOTP(
         email: email,
         token: otpCode,
@@ -55,7 +523,6 @@ class SupabaseService {
       );
 
       if (response.user != null) {
-        // Update user sebagai verified di database kita
         await client.from('users').update({
           'is_verified': true,
           'verified_at': DateTime.now().toIso8601String(),
@@ -76,7 +543,7 @@ class SupabaseService {
     }
   }
 
-  /// Resend OTP verification email - FIXED VERSION
+  /// Resend OTP verification email
   Future<void> resendVerificationEmail(String email) async {
     if (!isAvailable) {
       throw Exception('Supabase not available');
@@ -87,15 +554,10 @@ class SupabaseService {
         debugPrint('📧 Resending verification email to: $email');
       }
 
-      // FIX: Gunakan method yang lebih sederhana untuk resend email verification
-      // Cara 1: Panggil signUp lagi dengan email yang sama (Supabase akan resend OTP)
       await client.auth.signUp(
-        email: email, password: '',
-        // Tidak perlu password untuk resend verification
+        email: email, 
+        password: 'temporary_password_for_resend',
       );
-
-      // Atau Cara 2: Jika cara di atas tidak work, gunakan resetPasswordForEmail
-      // await client.auth.resetPasswordForEmail(email);
 
       if (kDebugMode) {
         debugPrint('✅ Verification email resent');
@@ -105,7 +567,6 @@ class SupabaseService {
         debugPrint('❌ Error resending verification email: $e');
       }
       
-      // Handle rate limit error
       if (e.toString().contains('over_email_send_rate_limit')) {
         throw Exception('Email rate limit exceeded. Please wait 1 minute before trying again.');
       }
@@ -140,7 +601,7 @@ class SupabaseService {
   // AUTH METHODS
   // ===============================
 
-  /// Get user authentication data including password hash and salt
+  /// Get user authentication data
   Future<Map<String, dynamic>?> getUserAuthData(String email) async {
     if (!isAvailable) {
       if (kDebugMode) {
@@ -165,7 +626,7 @@ class SupabaseService {
     }
   }
 
-  /// Sign in user dengan email dan password
+  /// Sign in user
   Future<AuthResponse> signIn(String email, String password) async {
     if (!isAvailable) {
       throw Exception('Supabase not configured');
@@ -259,7 +720,6 @@ class SupabaseService {
         debugPrint('🔐 Starting Supabase registration with crypto...');
       }
 
-      // 1. Daftar user di Supabase Auth - akan otomatis kirim OTP email
       final authResponse = await client.auth.signUp(
         email: email.trim(),
         password: password,
@@ -275,7 +735,6 @@ class SupabaseService {
         throw Exception('Registration failed - user ID is empty');
       }
 
-      // 2. Buat profile di tabel users
       final userPin = _generateUserPin();
       final userData = {
         'id': userId,
@@ -284,27 +743,21 @@ class SupabaseService {
         'user_pin': userPin,
         'password_hash': passwordHash,
         'salt': salt,
-        'is_verified': false, // Default false, akan diupdate setelah OTP verification
+        'is_verified': false,
         'created_at': DateTime.now().toIso8601String(),
       };
 
       if (kDebugMode) {
         debugPrint('   💾 Creating user profile with crypto data');
         debugPrint('   📌 Generated PIN: $userPin');
-        debugPrint('   🔐 Password Hash: ${passwordHash.substring(0, 20)}...');
-        debugPrint('   🧂 Salt: ${salt.substring(0, 16)}...');
         debugPrint('   📧 OTP email sent to: $email');
       }
 
-      final profileResult = await client
+      await client
           .from('users')
           .insert(userData)
           .select()
           .single();
-
-      if (profileResult == null) {
-        throw Exception('Failed to create user profile in database');
-      }
 
       final result = {
         'success': true,
@@ -318,7 +771,6 @@ class SupabaseService {
         debugPrint('✅ Registration successful! OTP email sent.');
         debugPrint('   👤 User ID: $userId');
         debugPrint('   📌 User PIN: $userPin');
-        debugPrint('   🔐 Security: Hybrid Hash System');
       }
       return result;
 
@@ -327,7 +779,6 @@ class SupabaseService {
         debugPrint('❌ Sign up with crypto error: $e');
       }
       
-      // Handle rate limit error
       if (e.toString().contains('over_email_send_rate_limit')) {
         throw Exception('Email rate limit exceeded. Please wait 1 minute or use a different email address.');
       }
@@ -389,7 +840,7 @@ class SupabaseService {
     try {
       final response = await client.from(tableName).insert(data).select();
 
-      if (response is List && response.isNotEmpty) {
+      if (response.isNotEmpty) {
         return Map<String, dynamic>.from(response.first);
       }
 
@@ -479,7 +930,7 @@ class SupabaseService {
     try {
       final response = await client.from('users').select().eq('id', userId);
 
-      if (response is List && response.isNotEmpty) {
+      if (response.isNotEmpty) {
         return Map<String, dynamic>.from(response.first);
       }
       return null;
@@ -488,188 +939,6 @@ class SupabaseService {
         debugPrint('Error getting user profile: $e');
       }
       return null;
-    }
-  }
-
-  // ===============================
-  // SECURE DATABASE ENCRYPTION METHODS
-  // ===============================
-
-  /// Store encrypted user sensitive data
-  Future<void> storeEncryptedUserData({
-    required String userId,
-    required Map<String, dynamic> sensitiveData,
-    required String masterKey,
-  }) async {
-    try {
-      if (kDebugMode) {
-        debugPrint('🔐 Storing encrypted user data...');
-      }
-
-      final encryptedData = await _encryption.encryptUserProfile(
-        sensitiveData,
-        masterKey: masterKey,
-      );
-
-      await client.from('user_encrypted_data').upsert({
-        'user_id': userId,
-        'encrypted_data': encryptedData['encrypted_data'],
-        'iv': encryptedData['iv'],
-        'algorithm': encryptedData['algorithm'],
-        'updated_at': DateTime.now().toIso8601String(),
-      });
-
-      if (kDebugMode) {
-        debugPrint('✅ Encrypted user data stored successfully');
-      }
-    } catch (e) {
-      if (kDebugMode) {
-        debugPrint('❌ Error storing encrypted user data: $e');
-      }
-      rethrow;
-    }
-  }
-
-  /// Retrieve and decrypt user sensitive data
-  Future<Map<String, dynamic>?> getEncryptedUserData({
-    required String userId,
-    required String masterKey,
-  }) async {
-    try {
-      if (kDebugMode) {
-        debugPrint('🔐 Retrieving encrypted user data...');
-      }
-
-      final response = await client
-          .from('user_encrypted_data')
-          .select()
-          .eq('user_id', userId)
-          .maybeSingle();
-
-      if (response == null) return null;
-
-      final encryptedProfile = {
-        'encrypted_data': response['encrypted_data'],
-        'iv': response['iv'],
-      };
-
-      final decryptedData = await _encryption.decryptUserProfile(
-        encryptedProfile,
-        masterKey: masterKey,
-      );
-
-      if (kDebugMode) {
-        debugPrint('✅ Encrypted user data retrieved and decrypted');
-      }
-
-      return decryptedData;
-    } catch (e) {
-      if (kDebugMode) {
-        debugPrint('❌ Error retrieving encrypted user data: $e');
-      }
-      return null;
-    }
-  }
-
-  /// Store application settings dengan encryption
-  Future<void> storeEncryptedSettings({
-    required String settingsKey,
-    required dynamic settingsValue,
-    required String masterKey,
-  }) async {
-    try {
-      final encrypted = await _encryption.encryptDatabaseData(
-        json.encode(settingsValue),
-        masterKey: masterKey,
-      );
-
-      await client.from('encrypted_settings').upsert({
-        'settings_key': settingsKey,
-        'encrypted_value': encrypted['encrypted_data'],
-        'iv': encrypted['iv'],
-        'algorithm': encrypted['algorithm'],
-        'updated_at': DateTime.now().toIso8601String(),
-      });
-    } catch (e) {
-      if (kDebugMode) {
-        debugPrint('❌ Error storing encrypted settings: $e');
-      }
-      rethrow;
-    }
-  }
-
-  /// Retrieve application settings dengan decryption
-  Future<dynamic> getEncryptedSettings({
-    required String settingsKey,
-    required String masterKey,
-  }) async {
-    try {
-      final response = await client
-          .from('encrypted_settings')
-          .select()
-          .eq('settings_key', settingsKey)
-          .maybeSingle();
-
-      if (response == null) return null;
-
-      final decrypted = await _encryption.decryptDatabaseData(
-        response['encrypted_value'] as String,
-        masterKey: masterKey,
-        iv: response['iv'] as String,
-      );
-
-      return json.decode(decrypted);
-    } catch (e) {
-      if (kDebugMode) {
-        debugPrint('❌ Error retrieving encrypted settings: $e');
-      }
-      return null;
-    }
-  }
-
-  // ===============================
-  // DATABASE SCHEMA CREATION
-  // ===============================
-
-  /// Initialize encrypted tables (untuk development)
-  Future<void> initializeEncryptedTables() async {
-    try {
-      if (kDebugMode) {
-        debugPrint('🗃️ Initializing encrypted database tables...');
-      }
-
-      // Table untuk encrypted user data
-      await client.rpc('create_encrypted_tables_if_not_exists');
-
-      if (kDebugMode) {
-        debugPrint('✅ Encrypted tables initialized');
-      }
-    } catch (e) {
-      if (kDebugMode) {
-        debugPrint('❌ Error initializing encrypted tables: $e');
-        debugPrint('💡 Create tables manually in Supabase:');
-        debugPrint('''
-          -- Encrypted User Data Table
-          CREATE TABLE IF NOT EXISTS user_encrypted_data (
-            user_id UUID PRIMARY KEY REFERENCES auth.users(id),
-            encrypted_data TEXT NOT NULL,
-            iv TEXT NOT NULL,
-            algorithm TEXT NOT NULL,
-            created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
-            updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
-          );
-
-          -- Encrypted Settings Table
-          CREATE TABLE IF NOT EXISTS encrypted_settings (
-            settings_key TEXT PRIMARY KEY,
-            encrypted_value TEXT NOT NULL,
-            iv TEXT NOT NULL,
-            algorithm TEXT NOT NULL,
-            created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
-            updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
-          );
-        ''');
-      }
     }
   }
 
@@ -686,7 +955,6 @@ class SupabaseService {
     }
 
     try {
-      // Query untuk mendapatkan chat user
       final response = await client
           .from('chats')
           .select('''
@@ -751,7 +1019,6 @@ class SupabaseService {
     }
 
     try {
-      // Cek apakah chat sudah ada
       final existingChat = await client
           .from('chats')
           .select()
@@ -762,7 +1029,6 @@ class SupabaseService {
         return existingChat['id'];
       }
 
-      // Buat chat baru
       final response = await client
           .from('chats')
           .insert({
@@ -827,7 +1093,7 @@ class SupabaseService {
   String _generateUserPin() {
     try {
       final random = Random.secure();
-      final pin = (random.nextInt(900000) + 100000).toString(); // 100000-999999
+      final pin = (random.nextInt(900000) + 100000).toString();
 
       if (pin.length != 6) {
         throw Exception('Generated PIN length is not 6: $pin');
@@ -841,7 +1107,7 @@ class SupabaseService {
       if (kDebugMode) {
         debugPrint('❌ Error generating PIN: $e');
       }
-      return '123456'; // Fallback PIN
+      return '123456';
     }
   }
 
@@ -872,10 +1138,32 @@ class SupabaseService {
       debugPrint('Signed In: $isSignedIn');
       debugPrint('User ID: ${currentUserId ?? 'None'}');
       debugPrint('User Email: ${currentUserEmail ?? 'None'}');
-      debugPrint('OTP System: Real Supabase OTP');
-      debugPrint('Encryption: Camellia-256 + XOR');
+      debugPrint('File Features: Compression + Multiple Types');
       debugPrint('==================================');
     }
   }
+}
 
+// Data model untuk file processing result
+class FileProcessingResult {
+  final Uint8List data;
+  final String mimeType;
+  final String fileName;
+  final bool isCompressed;
+  final String compressionInfo;
+  final int originalSize;
+  final int processedSize;
+
+  FileProcessingResult({
+    required this.data,
+    required this.mimeType,
+    required this.fileName,
+    required this.isCompressed,
+    required this.compressionInfo,
+    required this.originalSize,
+    required this.processedSize,
+  });
+
+  int get sizeSaved => originalSize - processedSize;
+  double get compressionRatio => originalSize > 0 ? (sizeSaved / originalSize * 100) : 0;
 }

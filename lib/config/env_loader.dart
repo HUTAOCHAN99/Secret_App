@@ -21,7 +21,6 @@ class EnvLoader {
         debugPrint('✅ Environment file loaded successfully');
         debugPrint('📋 Loaded ${_env.length} environment variables');
         
-        // Print keys saja tanpa values untuk security
         debugPrint('🔑 Available keys: ${_env.keys.join(', ')}');
       }
     } catch (e) {
@@ -31,7 +30,6 @@ class EnvLoader {
       }
       _env = {};
       _isLoaded = false;
-      // Jangan throw error, biarkan app tetap jalan dengan values kosong
     }
   }
 
@@ -41,9 +39,7 @@ class EnvLoader {
     
     for (final line in lines) {
       final trimmedLine = line.trim();
-      
-      // Skip empty lines dan comments
-      if (trimmedLine.isEmpty || trimmedLine.startsWith('#')) {
+            if (trimmedLine.isEmpty || trimmedLine.startsWith('#')) {
         continue;
       }
       
@@ -52,13 +48,11 @@ class EnvLoader {
         final key = trimmedLine.substring(0, index).trim();
         String value = trimmedLine.substring(index + 1).trim();
         
-        // Remove quotes jika ada
         if ((value.startsWith('"') && value.endsWith('"')) || 
             (value.startsWith("'") && value.endsWith("'"))) {
           value = value.substring(1, value.length - 1);
         }
         
-        // Handle escaped characters
         value = value.replaceAll(r'\"', '"').replaceAll(r"\'", "'");
         env[key] = value;
       }

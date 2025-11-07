@@ -1,10 +1,7 @@
 // lib/generated/crypto_bindings.dart
-// MANUAL BINDING - NO FFIGEN NEEDED
-
 import 'dart:ffi';
 import 'package:ffi/ffi.dart';
 
-/// SHA3 Context Structure - harus base/final
 final class SHA3_CTX extends Struct {
   @Array(25)
   external Array<Uint64> state;
@@ -16,7 +13,6 @@ final class SHA3_CTX extends Struct {
   external int pt;
 }
 
-/// Crypto Bindings for Argon2 and SHA3
 class CryptoBindings {
   final DynamicLibrary lib;
 
@@ -24,7 +20,6 @@ class CryptoBindings {
     _initializeFunctions();
   }
 
-  // === ARGON2 FUNCTIONS ===
   late final int Function(
     int tCost,
     int mCost, 
@@ -37,14 +32,13 @@ class CryptoBindings {
     int hashlen,
   ) argon2id_hash_raw;
 
-  // === SHA3 FUNCTIONS ===
+
   late final void Function(Pointer<SHA3_CTX> ctx) sha3_512_init;
   late final void Function(Pointer<SHA3_CTX> ctx, Pointer<Uint8> data, int len) sha3_512_update;
   late final void Function(Pointer<Uint8> digest, Pointer<SHA3_CTX> ctx) sha3_512_final;
 
   void _initializeFunctions() {
     try {
-      // === Initialize Argon2 ===
       final argon2Lookup = lib.lookup<NativeFunction<
         Int32 Function(
           Uint32, Uint32, Uint32,
@@ -56,7 +50,6 @@ class CryptoBindings {
       
       argon2id_hash_raw = argon2Lookup.asFunction();
 
-      // === Initialize SHA3 ===
       final sha3InitLookup = lib.lookup<NativeFunction<
         Void Function(Pointer<SHA3_CTX>)
       >>('sha3_512_init');
@@ -79,10 +72,8 @@ class CryptoBindings {
     }
   }
 
-  /// Test function to verify bindings work
   bool testBindings() {
     try {
-      // Test SHA3 initialization
       final ctx = calloc<SHA3_CTX>();
       sha3_512_init(ctx);
       calloc.free(ctx);
