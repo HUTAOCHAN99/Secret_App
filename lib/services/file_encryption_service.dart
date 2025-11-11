@@ -14,7 +14,7 @@ class FileEncryptionService {
   // Constants
   static const int _keyLength = 32; // 256-bit key untuk ChaCha20
   static const int _nonceLength = 12; // 96-bit nonce untuk ChaCha20-Poly1305
-  static const int _hmacKeyLength = 32; // 256-bit key untuk HMAC-SHA512 (dikurangi dari 64)
+  static const int _hmacKeyLength = 32; // 256-bit key untuk HMAC-SHA512
   static const int _chunkSize = 4096; // 4KB chunks untuk streaming
 
   // ===============================
@@ -33,12 +33,22 @@ class FileEncryptionService {
         debugPrint('🔐 Starting file encryption: ChaCha20-Poly1305 + HMAC-SHA512');
         debugPrint('   File: $fileName');
         debugPrint('   Size: ${await file.length()} bytes');
+        debugPrint('   Encryption Key: $encryptionKey');
+        debugPrint('   Chat ID: $chatId');
       }
 
+      // Debug key derivation
+      await debugKeyDerivation(encryptionKey, chatId);
+
       // Generate keys dari encryption key - FIXED
-      final keys = _deriveKeysSafe(encryptionKey, chatId);
+      final keys = _deriveKeysStandard(encryptionKey, chatId);
       final chachaKey = keys['chacha_key']!;
       final hmacKey = keys['hmac_key']!;
+
+      if (kDebugMode) {
+        debugPrint('   Generated ChaCha20 Key: ${base64.encode(chachaKey).substring(0, 16)}...');
+        debugPrint('   Generated HMAC Key: ${base64.encode(hmacKey).substring(0, 16)}...');
+      }
 
       // Generate random nonce
       final nonce = _generateNonce();
@@ -83,8 +93,8 @@ class FileEncryptionService {
       if (kDebugMode) {
         debugPrint('✅ File encryption completed successfully');
         debugPrint('   Encrypted size: ${encryptedBytes.length} bytes');
-        debugPrint('   Nonce: ${base64.encode(nonce).substring(0, 16)}...');
-        debugPrint('   Auth Tag: ${base64.encode(authTag).substring(0, 16)}...');
+        debugPrint('   Nonce: ${base64.encode(nonce)}');
+        debugPrint('   Auth Tag: ${base64.encode(authTag)}');
       }
 
       return result;
@@ -96,7 +106,7 @@ class FileEncryptionService {
     }
   }
 
-  /// Decrypt file dengan ChaCha20-Poly1305 + HMAC-SHA512
+  /// Decrypt file dengan ChaCha20-Poly1305 + HMAC-SHA512 - FIXED
   Future<Uint8List> decryptFile({
     required Uint8List encryptedData,
     required Uint8List nonce,
@@ -107,17 +117,46 @@ class FileEncryptionService {
     try {
       if (kDebugMode) {
         debugPrint('🔓 Starting file decryption: ChaCha20-Poly1305 + HMAC-SHA512');
+        debugPrint('   Encryption Key: $encryptionKey');
+        debugPrint('   Chat ID: $chatId');
+        debugPrint('   Encrypted data size: ${encryptedData.length} bytes');
+        debugPrint('   Nonce: ${base64.encode(nonce)}');
+        debugPrint('   Auth Tag: ${base64.encode(authTag)}');
       }
 
+      // Debug key derivation
+      await debugKeyDerivation(encryptionKey, chatId);
+
       // Generate keys dari encryption key - FIXED
-      final keys = _deriveKeysSafe(encryptionKey, chatId);
+      final keys = _deriveKeysStandard(encryptionKey, chatId);
       final chachaKey = keys['chacha_key']!;
       final hmacKey = keys['hmac_key']!;
 
+      if (kDebugMode) {
+        debugPrint('   Generated ChaCha20 Key: ${base64.encode(chachaKey).substring(0, 16)}...');
+        debugPrint('   Generated HMAC Key: ${base64.encode(hmacKey).substring(0, 16)}...');
+      }
+
       // Verify HMAC terlebih dahulu
+      if (kDebugMode) {
+        debugPrint('   Verifying HMAC authentication...');
+      }
+      
       final isAuthentic = _verifyHmac(encryptedData, hmacKey, nonce, authTag, encryptedData.length);
+      
       if (!isAuthentic) {
-        throw Exception('File authentication failed - HMAC verification failed');
+        if (kDebugMode) {
+          debugPrint('❌ HMAC verification failed!');
+          final expectedAuthTag = _generateAuthTag(encryptedData, hmacKey, nonce, encryptedData.length);
+          debugPrint('   Expected Auth Tag: ${base64.encode(expectedAuthTag)}');
+          debugPrint('   Received Auth Tag: ${base64.encode(authTag)}');
+          debugPrint('   Keys may be inconsistent between encryption and decryption');
+        }
+        throw Exception('File authentication failed - HMAC verification failed. Ensure encryption and decryption use the same keys and chat ID.');
+      }
+
+      if (kDebugMode) {
+        debugPrint('✅ HMAC verification successful');
       }
 
       final decryptedBytes = <int>[];
@@ -156,6 +195,24 @@ class FileEncryptionService {
   // KEY DERIVATION - FIXED VERSION
   // ===============================
 
+  /// Debug method untuk test key consistency
+  Future<void> debugKeyDerivation(String baseKey, String context) async {
+    if (kDebugMode) {
+      debugPrint('=== KEY DERIVATION DEBUG ===');
+      debugPrint('Base Key: $baseKey');
+      debugPrint('Base Key length: ${baseKey.length}');
+      debugPrint('Base Key bytes: ${base64.encode(utf8.encode(baseKey))}');
+      debugPrint('Context: $context');
+      
+      final keys = _deriveKeysStandard(baseKey, context);
+      debugPrint('ChaCha20 Key: ${base64.encode(keys['chacha_key']!)}');
+      debugPrint('HMAC Key: ${base64.encode(keys['hmac_key']!)}');
+      debugPrint('ChaCha20 Key length: ${keys['chacha_key']!.length}');
+      debugPrint('HMAC Key length: ${keys['hmac_key']!.length}');
+      debugPrint('============================');
+    }
+  }
+
   /// Safe key derivation dengan multiple fallbacks
   Map<String, Uint8List> _deriveKeysSafe(String baseKey, String context) {
     try {
@@ -178,14 +235,26 @@ class FileEncryptionService {
     }
   }
 
-  /// Standard key derivation
+  /// Standard key derivation - FIXED
   Map<String, Uint8List> _deriveKeysStandard(String baseKey, String context) {
+    // PASTIKAN format string sama persis dengan encryption
     final keyMaterial = '$baseKey::$context::file_encryption_2024';
+    
+    if (kDebugMode) {
+      debugPrint('   Key Material: $keyMaterial');
+      debugPrint('   Key Material bytes: ${utf8.encode(keyMaterial).length}');
+    }
+    
     final hash = sha512.convert(utf8.encode(keyMaterial)).bytes;
     
     // Validasi panjang hash
     if (hash.length < _keyLength + _hmacKeyLength) {
-      throw Exception('Hash length insufficient');
+      // Extend hash jika diperlukan
+      final extendedHash = [...hash, ...sha512.convert(hash).bytes];
+      return {
+        'chacha_key': Uint8List.fromList(extendedHash.sublist(0, _keyLength)),
+        'hmac_key': Uint8List.fromList(extendedHash.sublist(_keyLength, _keyLength + _hmacKeyLength)),
+      };
     }
     
     return {
@@ -457,6 +526,70 @@ class FileEncryptionService {
   // ===============================
   // TESTING & VALIDATION
   // ===============================
+
+  /// Test encryption/decryption dengan key yang sama
+  Future<bool> testEncryptionDecryptionCycle() async {
+    try {
+      if (kDebugMode) {
+        debugPrint('🧪 Testing encryption/decryption cycle...');
+      }
+
+      // Create test file
+      final testData = 'Test file for encryption/decryption cycle test';
+      final tempDir = await getTemporaryDirectory();
+      final testFile = File('${tempDir.path}/cycle_test.txt');
+      await testFile.writeAsString(testData);
+
+      const testKey = 'test_encryption_key_2024';
+      const testChatId = 'test_chat_123';
+
+      if (kDebugMode) {
+        debugPrint('   Test Key: $testKey');
+        debugPrint('   Test Chat ID: $testChatId');
+      }
+
+      // Encrypt file
+      final encryptedResult = await encryptFile(
+        file: testFile,
+        encryptionKey: testKey,
+        chatId: testChatId,
+        fileName: 'cycle_test.txt',
+      );
+
+      // Immediately decrypt file
+      final decryptedData = await decryptFile(
+        encryptedData: encryptedResult.encryptedData,
+        nonce: encryptedResult.nonce,
+        authTag: encryptedResult.authTag,
+        encryptionKey: testKey,
+        chatId: testChatId,
+      );
+
+      // Verify
+      final decryptedText = utf8.decode(decryptedData);
+      final success = decryptedText == testData;
+
+      if (kDebugMode) {
+        if (success) {
+          debugPrint('✅ Encryption/decryption cycle test PASSED');
+        } else {
+          debugPrint('❌ Encryption/decryption cycle test FAILED');
+          debugPrint('   Original: "$testData"');
+          debugPrint('   Decrypted: "$decryptedText"');
+        }
+      }
+
+      // Cleanup
+      await testFile.delete();
+
+      return success;
+    } catch (e) {
+      if (kDebugMode) {
+        debugPrint('❌ Encryption/decryption cycle test error: $e');
+      }
+      return false;
+    }
+  }
 
   /// Test file encryption/decryption
   Future<bool> testFileEncryption() async {

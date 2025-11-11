@@ -52,18 +52,14 @@ class CamelliaEncryption {
         debugPrint('🔒 Camellia-256 Encrypting: ${plaintext.length} bytes');
       }
 
-      // Validasi key
       if (key.length != _keySize) {
         throw Exception('Invalid key size. Expected $_keySize bytes, got ${key.length}');
       }
 
-      // Generate random IV
       final iv = _generateIV();
       
-      // Pad plaintext ke multiple of block size
       final paddedData = _padData(utf8.encode(plaintext));
       
-      // Encrypt blocks dalam mode CBC
       final encryptedBlocks = _encryptCBC(paddedData, key, iv);
       
       final result = {
@@ -89,29 +85,23 @@ class CamelliaEncryption {
     }
   }
 
-  /// Decrypt data menggunakan Camellia-256 dalam mode CBC
   Future<String> decrypt(String encryptedData, Uint8List key, String ivBase64) async {
     try {
       if (kDebugMode) {
         debugPrint('🔓 Camellia-256 Decrypting: ${encryptedData.length} chars');
       }
 
-      // Validasi key
       if (key.length != _keySize) {
         throw Exception('Invalid key size. Expected $_keySize bytes, got ${key.length}');
       }
 
-      // Decode dari base64
       final iv = base64.decode(ivBase64);
       final encryptedBytes = base64.decode(encryptedData);
       
-      // Decrypt blocks dalam mode CBC
       final decryptedBlocks = _decryptCBC(encryptedBytes, key, iv);
       
-      // Unpad data
       final unpaddedData = _unpadData(decryptedBlocks);
       
-      // Convert ke string
       final plaintext = utf8.decode(unpaddedData);
 
       if (kDebugMode) {
@@ -128,7 +118,6 @@ class CamelliaEncryption {
     }
   }
 
-  /// Encrypt binary data
   Future<Map<String, dynamic>> encryptBinary(Uint8List data, Uint8List key) async {
     try {
       final iv = _generateIV();
@@ -148,7 +137,6 @@ class CamelliaEncryption {
     }
   }
 
-  /// Decrypt binary data
   Future<List<int>> decryptBinary(String encryptedData, Uint8List key, String ivBase64) async {
     try {
       final iv = base64.decode(ivBase64);
@@ -163,20 +151,14 @@ class CamelliaEncryption {
     }
   }
 
-  // ===============================
-  // CORE CAMELLIA ALGORITHM
-  // ===============================
-
   List<int> _encryptCBC(List<int> data, Uint8List key, List<int> iv) {
     final blocks = _splitIntoBlocks(data);
     final encryptedBlocks = <List<int>>[];
     List<int> previousBlock = iv;
 
     for (final block in blocks) {
-      // XOR dengan previous block (CBC mode)
       final xoredBlock = _xorBlocks(block, previousBlock);
       
-      // Encrypt block dengan Camellia
       final encryptedBlock = _encryptBlock(xoredBlock, key);
       
       encryptedBlocks.add(encryptedBlock);
@@ -192,10 +174,8 @@ class CamelliaEncryption {
     List<int> previousBlock = iv;
 
     for (final block in blocks) {
-      // Decrypt block dengan Camellia
       final decryptedBlock = _decryptBlock(block, key);
-      
-      // XOR dengan previous block (CBC mode)
+
       final xoredBlock = _xorBlocks(decryptedBlock, previousBlock);
       
       decryptedBlocks.add(xoredBlock);
@@ -206,25 +186,21 @@ class CamelliaEncryption {
   }
 
   List<int> _encryptBlock(List<int> block, Uint8List key) {
-    // Simplified Camellia Feistel network
+
     var left = block.sublist(0, 8);
     var right = block.sublist(8, 16);
 
-    // 18 rounds untuk Camellia-256
     for (int round = 0; round < 18; round++) {
       final roundKey = _generateRoundKey(key, round);
       final temp = right;
       
-      // F-function
       right = _fFunction(right, roundKey);
       
-      // XOR dengan left
       right = _xorBlocks(left, right);
       
       left = temp;
     }
 
-    // Final swap
     return [...right, ...left];
   }
 
@@ -232,29 +208,23 @@ class CamelliaEncryption {
     var left = block.sublist(0, 8);
     var right = block.sublist(8, 16);
 
-    // Reverse rounds untuk decryption
     for (int round = 17; round >= 0; round--) {
       final roundKey = _generateRoundKey(key, round);
       final temp = left;
       
-      // F-function
       left = _fFunction(left, roundKey);
       
-      // XOR dengan right
       left = _xorBlocks(right, left);
       
       right = temp;
     }
 
-    // Final swap
     return [...right, ...left];
   }
 
   List<int> _fFunction(List<int> data, List<int> roundKey) {
-    // F-function: XOR dengan key, lalu S-Box substitution
     var result = _xorBlocks(data, roundKey);
     
-    // S-Box substitution (4 layers)
     result = _sBoxSubstitution(result, _sBox1);
     result = _sBoxSubstitution(result, _sBox2);
     result = _sBoxSubstitution(result, _sBox3);
@@ -274,7 +244,7 @@ class CamelliaEncryption {
   }
 
   List<int> _generateRoundKey(Uint8List masterKey, int round) {
-    // Generate round key dari master key
+
     final roundKey = List<int>.filled(8, 0);
     final keyBytes = masterKey.length;
     
@@ -286,9 +256,7 @@ class CamelliaEncryption {
     return roundKey;
   }
 
-  // ===============================
-  // HELPER METHODS
-  // ===============================
+
 
   List<List<int>> _splitIntoBlocks(List<int> data) {
     final blocks = <List<int>>[];
@@ -296,7 +264,6 @@ class CamelliaEncryption {
       final end = (i + _blockSize) <= data.length ? i + _blockSize : data.length;
       final block = data.sublist(i, end);
       
-      // Pad block terakhir jika diperlukan
       if (block.length < _blockSize) {
         blocks.add(_padBlock(block));
       } else {
@@ -310,7 +277,6 @@ class CamelliaEncryption {
     final paddingLength = _blockSize - (data.length % _blockSize);
     final padded = List<int>.from(data);
     
-    // PKCS7 padding
     for (int i = 0; i < paddingLength; i++) {
       padded.add(paddingLength);
     }
@@ -338,7 +304,7 @@ class CamelliaEncryption {
     if (paddingLength > 0 && paddingLength <= _blockSize) {
       for (int i = data.length - paddingLength; i < data.length; i++) {
         if (data[i] != paddingLength) {
-          return data; // Invalid padding, return as-is
+          return data; 
         }
       }
       return data.sublist(0, data.length - paddingLength);
@@ -361,11 +327,10 @@ class CamelliaEncryption {
   }
 
   Uint8List _sha256Like(List<int> data) {
-    // Simplified SHA-256 like hash untuk key derivation
     var hash = 0;
     for (final byte in data) {
       hash = (hash << 5) - hash + byte;
-      hash = hash & hash; // Convert to 32-bit
+      hash = hash & hash;
     }
     
     final result = Uint8List(32);
@@ -376,9 +341,6 @@ class CamelliaEncryption {
     return result;
   }
 
-  // ===============================
-  // SECURITY AUDIT & TESTING
-  // ===============================
 
   Future<bool> testEncryption() async {
     try {
@@ -389,10 +351,8 @@ class CamelliaEncryption {
       const testMessage = 'Hello, this is a Camellia-256 test message! 🔐';
       final testKey = generateKey('test_password_123');
       
-      // Encrypt
       final encrypted = await encrypt(testMessage, testKey);
       
-      // Decrypt
       final decrypted = await decrypt(
         encrypted['encrypted_data'] as String,
         testKey,

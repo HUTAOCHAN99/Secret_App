@@ -14,11 +14,6 @@ class EncryptionService {
   final CamelliaEncryption _camellia = CamelliaEncryption();
   final HybridEncryptionService _hybridEncryption = HybridEncryptionService();
 
-  // ===============================
-  // HYBRID ENCRYPTION METHODS
-  // ===============================
-
-  /// Hybrid encryption untuk chat messages dengan Affine + Vigenere + AES-256
   Future<Map<String, dynamic>> hybridEncryptMessage({
     required String message,
     required String userPin1,
@@ -51,12 +46,10 @@ class EncryptionService {
         debugPrint('❌ Hybrid message encryption error: $e');
         debugPrint('🔄 Falling back to standard encryption...');
       }
-      // Fallback ke encryption biasa
       return await encryptMessage(message, generateChatKey(userPin1, userPin2));
     }
   }
 
-  /// Hybrid decryption untuk chat messages
   Future<String> hybridDecryptMessage({
     required String encryptedMessage,
     required String iv,
@@ -88,54 +81,42 @@ class EncryptionService {
         debugPrint('❌ Hybrid message decryption error: $e');
         debugPrint('🔄 Falling back to standard decryption...');
       }
-      // Fallback ke decryption biasa
       return await decryptMessage(encryptedMessage, iv, generateChatKey(userPin1, userPin2));
     }
   }
 
-  /// Derive master key untuk hybrid encryption
   String _deriveMasterKey(String userPin1, String userPin2) {
     final pins = [userPin1, userPin2]..sort();
     final combined = '${pins[0]}::${pins[1]}::hybrid_master_key_2024';
     final bytes = utf8.encode(combined);
     
-    // Double hash untuk security tambahan
     var hash = 0;
     for (final byte in bytes) {
       hash = (hash << 5) - hash + byte;
-      hash = hash & hash; // Convert to 32-bit integer
+      hash = hash & hash;
     }
     
-    // Buat key yang lebih panjang untuk AES-256
     final keyString = hash.abs().toString().padRight(64, '0').substring(0, 64);
     return base64.encode(utf8.encode(keyString));
   }
 
-  // ===============================
-  // STANDARD ENCRYPTION METHODS (EXISTING)
-  // ===============================
-
-  /// Generate chat key dari user PINs
   static String generateChatKey(String userPin1, String userPin2) {
     try {
       if (kDebugMode) {
         debugPrint('🔑 Generating chat key from PINs: $userPin1 and $userPin2');
       }
 
-      // Sort PINs untuk memastikan key sama tanpa memperhatikan urutan
       final pins = [userPin1, userPin2]..sort();
       final combined = '${pins[0]}_${pins[1]}_secret_chat_key_2024';
       
-      // Hash sederhana menggunakan kombinasi base64 dan XOR
       final bytes = utf8.encode(combined);
       var hash = 0;
       
       for (final byte in bytes) {
         hash = (hash << 5) - hash + byte;
-        hash = hash & hash; // Convert to 32-bit integer
+        hash = hash & hash;
       }
       
-      // Buat key 32 bytes dari hash
       final keyString = hash.abs().toString().padRight(32, '0').substring(0, 32);
       final keyBytes = utf8.encode(keyString);
       
@@ -151,19 +132,16 @@ class EncryptionService {
       if (kDebugMode) {
         debugPrint('❌ Error generating chat key: $e');
       }
-      // Fallback key
       return 'YWJjZGVmZ2hpamtsbW5vcHFyc3R1dnd4eXoxMjM0NTY3ODkw';
     }
   }
 
-  /// Simple XOR-based encryption dengan IV
   Future<Map<String, dynamic>> encryptMessage(String message, String encryptionKey) async {
     try {
       if (kDebugMode) {
         debugPrint('🔒 Encrypting message (length: ${message.length})');
       }
 
-      // Validasi input
       if (message.isEmpty) {
         throw Exception('Message cannot be empty');
       }
@@ -171,16 +149,12 @@ class EncryptionService {
         throw Exception('Encryption key cannot be empty');
       }
 
-      // Decode key dari base64
       final keyBytes = base64.decode(encryptionKey);
       
-      // Generate random IV (Initialization Vector)
       final iv = _generateIV();
       
-      // Convert message ke bytes
       final messageBytes = utf8.encode(message);
-      
-      // Encrypt menggunakan XOR dengan key cycling dan IV
+
       final encryptedBytes = _xorEncrypt(messageBytes, keyBytes, iv);
       
       final result = {
@@ -206,14 +180,12 @@ class EncryptionService {
     }
   }
 
-  /// Simple XOR-based decryption dengan IV
   Future<String> decryptMessage(String encryptedMessage, String iv, String encryptionKey) async {
     try {
       if (kDebugMode) {
         debugPrint('🔓 Decrypting message (encrypted length: ${encryptedMessage.length})');
       }
 
-      // Validasi input
       if (encryptedMessage.isEmpty) {
         throw Exception('Encrypted message cannot be empty');
       }
@@ -224,15 +196,12 @@ class EncryptionService {
         throw Exception('Encryption key cannot be empty');
       }
 
-      // Decode dari base64
       final keyBytes = base64.decode(encryptionKey);
       final ivBytes = base64.decode(iv);
       final encryptedBytes = base64.decode(encryptedMessage);
       
-      // Decrypt menggunakan XOR
       final decryptedBytes = _xorDecrypt(encryptedBytes, keyBytes, ivBytes);
       
-      // Convert kembali ke string
       final decryptedMessage = utf8.decode(decryptedBytes);
       
       if (kDebugMode) {
@@ -251,8 +220,7 @@ class EncryptionService {
       rethrow;
     }
   }
-
-  // XOR encryption algorithm dengan IV
+  
   List<int> _xorEncrypt(List<int> data, List<int> key, List<int> iv) {
     final result = List<int>.filled(data.length, 0);
     

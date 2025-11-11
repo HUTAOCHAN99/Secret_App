@@ -3,7 +3,6 @@ import 'package:flutter/foundation.dart';
 import 'crypto_auth.dart';
 import 'crypto_auth_ffi.dart';
 
-/// Factory untuk memilih crypto service berdasarkan platform
 class CryptoServiceFactory {
   static dynamic getCryptoService() {
     try {
@@ -13,7 +12,6 @@ class CryptoServiceFactory {
         }
         return CryptoAuthService();
       } else {
-        // Coba load FFI service dulu
         try {
           final ffiService = CryptoAuthFFI();
           if (ffiService.isAvailable) {
@@ -44,7 +42,6 @@ class CryptoServiceFactory {
   
   static bool get isWeb => kIsWeb;
   
-  /// Check if Argon2id + SHA3-512 is available
   static bool get isArgon2Available {
     if (kIsWeb) return false;
     try {
@@ -55,7 +52,6 @@ class CryptoServiceFactory {
     }
   }
 
-  /// Get crypto engine info
   static Map<String, dynamic> getCryptoEngineInfo() {
     try {
       if (kIsWeb) {
@@ -77,7 +73,6 @@ class CryptoServiceFactory {
             };
           }
         } catch (e) {
-          // Fall through to Dart service
         }
         return {
           'engine': 'dart_fallback',
@@ -96,12 +91,10 @@ class CryptoServiceFactory {
     }
   }
 
-  /// Test all available crypto services
   static Future<Map<String, dynamic>> testAllServices() async {
     final results = <String, dynamic>{};
     
     try {
-      // Test Dart service
       final dartService = CryptoAuthService();
       final dartTest = await dartService.hashPassword('test');
       results['dart_service'] = {
@@ -116,7 +109,6 @@ class CryptoServiceFactory {
       };
     }
 
-    // Test FFI service jika bukan web
     if (!kIsWeb) {
       try {
         final ffiService = CryptoAuthFFI();

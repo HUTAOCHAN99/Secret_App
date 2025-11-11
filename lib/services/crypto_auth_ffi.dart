@@ -31,7 +31,6 @@ class CryptoAuthFFI {
       }
 
       if (Platform.isWindows) {
-        // Try multiple possible library locations for Windows
         final possiblePaths = [
           'argon2.dll',
           'libargon2.dll',
@@ -52,13 +51,11 @@ class CryptoAuthFFI {
             }
             break;
           } catch (e) {
-            // Continue to next path
             continue;
           }
         }
         
         if (loadedLib == null) {
-          // Try to load from system path or common locations
           try {
             loadedLib = DynamicLibrary.open('argon2.dll');
             loadedPath = 'argon2.dll (system)';
@@ -75,7 +72,6 @@ class CryptoAuthFFI {
         _nativeLib = loadedLib;
         _bindings = CryptoBindings(_nativeLib);
         
-        // Test bindings dengan simple function call
         final testSuccess = _testBindings();
         if (!testSuccess) {
           throw Exception('Native function bindings test failed');
@@ -113,7 +109,7 @@ class CryptoAuthFFI {
 
   bool _testBindings() {
     try {
-      // Test SHA3 initialization
+
       final ctx = calloc<SHA3_CTX>();
       _bindings.sha3_512_init(ctx);
       calloc.free(ctx);
@@ -127,11 +123,6 @@ class CryptoAuthFFI {
     }
   }
 
-  // ===============================
-  // ARGON2ID IMPLEMENTATION
-  // ===============================
-
-  /// Generate Argon2id hash using FFI
   Future<Argon2HashResult> hashPasswordArgon2id(String password) async {
     if (!_isInitialized) {
       throw Exception('FFI not initialized - Argon2id unavailable');
@@ -142,23 +133,21 @@ class CryptoAuthFFI {
         debugPrint('🔐 Hashing password with Argon2id (Native FFI)...');
       }
 
-      // Generate random salt
+
       final salt = _generateSalt(16);
       
-      // Convert to pointers
       final passwordPtr = _stringToUint8Pointer(password);
       final saltPtr = _bytesToPointer(salt);
       
-      // Prepare output buffer
+
       final hashLength = 32;
       final hashPtr = calloc<Uint8>(hashLength);
 
       try {
-        // Call Argon2id via FFI
         final result = _bindings.argon2id_hash_raw(
-          3,      // iterations
-          65536,  // memory (64MB)
-          4,      // parallelism
+          3,  
+          65536, 
+          4,     
           passwordPtr,
           password.length,
           saltPtr,
@@ -171,7 +160,6 @@ class CryptoAuthFFI {
           throw Exception('Argon2id hashing failed with code: $result');
         }
 
-        // Copy result back to Dart
         final hashBytes = hashPtr.asTypedList(hashLength).toList();
         final hash = Uint8List.fromList(hashBytes);
 
@@ -196,7 +184,6 @@ class CryptoAuthFFI {
 
         return resultObj;
       } finally {
-        // Cleanup
         calloc.free(passwordPtr);
         calloc.free(saltPtr);
         calloc.free(hashPtr);
@@ -209,7 +196,6 @@ class CryptoAuthFFI {
     }
   }
 
-  /// Verify password with Argon2id
   Future<bool> verifyPasswordArgon2id(String password, String storedHash, String storedSalt) async {
     if (!_isInitialized) {
       throw Exception('FFI not initialized - Argon2id unavailable');
@@ -235,11 +221,6 @@ class CryptoAuthFFI {
     }
   }
 
-  // ===============================
-  // SHA3-512 IMPLEMENTATION  
-  // ===============================
-
-  /// Generate SHA3-512 hash using FFI
   String hashDataSHA3_512(String data) {
     if (!_isInitialized) {
       throw Exception('FFI not initialized - SHA3-512 unavailable');
@@ -250,23 +231,19 @@ class CryptoAuthFFI {
         debugPrint('🔏 Hashing data with SHA3-512 (Native FFI)...');
       }
 
-      // Allocate context and digest
+
       final ctxPtr = calloc<SHA3_CTX>();
-      final digestPtr = calloc<Uint8>(64); // 512-bit = 64 bytes
+      final digestPtr = calloc<Uint8>(64); 
 
       try {
-        // Initialize SHA3-512
         _bindings.sha3_512_init(ctxPtr);
 
-        // Update with data
         final dataBytes = utf8.encode(data);
         final dataPtr = _bytesToPointer(Uint8List.fromList(dataBytes));
         _bindings.sha3_512_update(ctxPtr, dataPtr, dataBytes.length);
 
-        // Finalize hash
         _bindings.sha3_512_final(digestPtr, ctxPtr);
 
-        // Copy result
         final digestBytes = digestPtr.asTypedList(64).toList();
         final hashBase64 = base64.encode(digestBytes);
 
@@ -288,11 +265,7 @@ class CryptoAuthFFI {
     }
   }
 
-  // ===============================
-  // HYBRID AUTHENTICATION (REAL ARGON2ID + SHA3-512)
-  // ===============================
 
-  /// Real Argon2id + SHA3-512 Hybrid Authentication
   Future<HybridAuthResult> hybridAuthenticate({
     required String password,
     required String challenge,
@@ -308,12 +281,10 @@ class CryptoAuthFFI {
         debugPrint('🛡️ Starting REAL Argon2id + SHA3-512 hybrid auth...');
       }
 
-      // Step 1: Hash password dengan Argon2id
       final String passwordHash;
       final String salt;
 
       if (storedHash != null && storedSalt != null) {
-        // Verification mode - kita perlu re-hash dan compare
         if (kDebugMode) {
           debugPrint('   🔍 Verifying with Argon2id...');
         }
@@ -325,7 +296,6 @@ class CryptoAuthFFI {
         passwordHash = storedHash;
         salt = storedSalt;
       } else {
-        // Registration mode
         if (kDebugMode) {
           debugPrint('   🆕 Creating new Argon2id hash...');
         }
@@ -334,13 +304,11 @@ class CryptoAuthFFI {
         salt = argon2Result.salt;
       }
 
-      // Step 2: Hash challenge dengan SHA3-512
       if (kDebugMode) {
         debugPrint('   🔏 Hashing challenge with SHA3-512...');
       }
       final challengeHash = hashDataSHA3_512(challenge);
 
-      // Step 3: Combine hashes dengan secure method
       final combinedHash = _combineHashesSecure(passwordHash, challengeHash);
 
       final result = HybridAuthResult(
@@ -368,9 +336,6 @@ class CryptoAuthFFI {
     }
   }
 
-  // ===============================
-  // HELPER METHODS
-  // ===============================
 
   Uint8List _generateSalt(int length) {
     final random = Random.secure();
@@ -405,12 +370,10 @@ class CryptoAuthFFI {
     return result == 0;
   }
 
-  /// Secure hash combination untuk Argon2id + SHA3-512
   String _combineHashesSecure(String hash1, String hash2) {
     final bytes1 = base64.decode(hash1);
     final bytes2 = base64.decode(hash2);
     
-    // Use HMAC-like approach dengan additional security
     final combined = Uint8List(bytes1.length);
     final key = Uint8List.fromList([...bytes2, ...bytes1.sublist(0, 16)]);
     
@@ -421,26 +384,18 @@ class CryptoAuthFFI {
     return base64.encode(combined);
   }
 
-  // ===============================
-  // UTILITY METHODS
-  // ===============================
-
   bool get isAvailable => _isInitialized;
 
-  /// Test all crypto functions
   Future<bool> testAllFunctions() async {
     try {
       if (!_isInitialized) return false;
 
-      // Test Argon2id
       final argonResult = await hashPasswordArgon2id('testpassword');
       if (argonResult.hash.isEmpty) return false;
 
-      // Test SHA3-512
       final sha3Hash = hashDataSHA3_512('test challenge');
       if (sha3Hash.isEmpty) return false;
 
-      // Test Hybrid Auth
       final hybridResult = await hybridAuthenticate(
         password: 'testpassword',
         challenge: 'test challenge',
@@ -459,7 +414,6 @@ class CryptoAuthFFI {
     }
   }
 
-  /// Security audit untuk FFI implementation
   Future<SecurityAuditResult> performSecurityAudit() async {
     try {
       final testResult = await testAllFunctions();
@@ -469,7 +423,7 @@ class CryptoAuthFFI {
         passwordHashing: testResult,
         dataHashing: testResult,
         hybridAuth: testResult,
-        encryption: false, // FFI doesn't handle encryption
+        encryption: false,
         randomGeneration: true,
         overallSecurity: testResult,
         recommendations: testResult ? 
@@ -507,11 +461,9 @@ Algorithms: Argon2id + SHA3-512
   }
 
   void dispose() {
-    // Cleanup resources if needed
   }
 }
 
-// Data models
 class Argon2HashResult {
   final String hash;
   final String salt;

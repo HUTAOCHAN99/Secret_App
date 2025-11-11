@@ -1,22 +1,15 @@
-// lib/services/crypto_auth_web.dart
 import 'dart:convert';
 import 'dart:math';
 import 'dart:typed_data';
 import 'package:flutter/foundation.dart';
 
-/// Web-compatible crypto service (gunakan pure Dart/JavaScript)
 class CryptoAuthWeb {
   static final CryptoAuthWeb _instance = CryptoAuthWeb._internal();
   factory CryptoAuthWeb() => _instance;
   CryptoAuthWeb._internal();
 
-  // Constants
   static const int _saltLength = 16;
   static const int _hashIterations = 100000;
-
-  // ===============================
-  // PASSWORD HASHING (Web-compatible)
-  // ===============================
 
   Future<Argon2HashResult> hashPasswordArgon2id(String password) async {
     try {
@@ -24,10 +17,8 @@ class CryptoAuthWeb {
         debugPrint('🔐 Hashing password with Web-compatible algorithm...');
       }
 
-      // Generate random salt
       final salt = _generateSalt(16);
-      
-      // Simulate Argon2id dengan PBKDF2-like approach
+
       final hash = _pbkdf2LikeHash(password, salt, 3, 65536, 4);
 
       final result = Argon2HashResult(
@@ -56,17 +47,12 @@ class CryptoAuthWeb {
     }
   }
 
-  // ===============================
-  // SHA3-512 (Web-compatible)
-  // ===============================
-
   String hashDataSHA3_512(String data) {
     try {
       if (kDebugMode) {
         debugPrint('🔏 Hashing data with SHA3-512 (Web)...');
       }
 
-      // Use Dart-based SHA3 simulation
       final dataBytes = utf8.encode(data);
       final hash = _sha3LikeHash(dataBytes);
       final hashBase64 = base64.encode(hash);
@@ -84,10 +70,6 @@ class CryptoAuthWeb {
     }
   }
 
-  // ===============================
-  // HYBRID AUTHENTICATION (Web)
-  // ===============================
-
   Future<HybridAuthResult> hybridAuthenticate({
     required String password,
     required String challenge,
@@ -99,12 +81,10 @@ class CryptoAuthWeb {
         debugPrint('🛡️ Starting Web-compatible hybrid auth...');
       }
 
-      // Step 1: Hash password
       final String passwordHash;
       final String salt;
 
       if (storedHash != null && storedSalt != null) {
-        // Verification mode
         final testResult = await hashPasswordArgon2id(password);
         final isValid = _constantTimeCompare(
           base64.decode(storedHash),
@@ -117,16 +97,13 @@ class CryptoAuthWeb {
         passwordHash = storedHash;
         salt = storedSalt;
       } else {
-        // Registration mode
         final argon2Result = await hashPasswordArgon2id(password);
         passwordHash = argon2Result.hash;
         salt = argon2Result.salt;
       }
 
-      // Step 2: Hash challenge
       final challengeHash = hashDataSHA3_512(challenge);
 
-      // Step 3: Combine hashes
       final combinedHash = _combineHashes(passwordHash, challengeHash);
 
       final result = HybridAuthResult(
@@ -151,16 +128,10 @@ class CryptoAuthWeb {
     }
   }
 
-  // ===============================
-  // WEB-COMPATIBLE HASHING ALGORITHMS
-  // ===============================
-
   Uint8List _pbkdf2LikeHash(String password, Uint8List salt, int iterations, int memory, int parallelism) {
     var hash = Uint8List.fromList([...salt, ...utf8.encode(password)]);
     
-    // Simulate memory-hard function dengan multiple passes
     for (int i = 0; i < iterations; i++) {
-      // Simulate memory usage
       final memoryBuffer = Uint8List(memory ~/ 8);
       for (int j = 0; j < parallelism; j++) {
         for (int k = 0; k < memoryBuffer.length; k += hash.length) {
@@ -170,42 +141,33 @@ class CryptoAuthWeb {
           }
         }
         
-        // Compress memory buffer into hash
         hash = _sha3LikeHash(Uint8List.fromList([...hash, ...memoryBuffer.sublist(0, 64)]));
       }
     }
     
-    return hash.sublist(0, 32); // Return 32-byte hash
+    return hash.sublist(0, 32);
   }
 
   Uint8List _sha3LikeHash(Uint8List data) {
-    // Simple SHA3-like hash simulation
     var hash = Uint8List(64);
     var state = List<int>.filled(25, 0);
     
-    // Absorb phase
     for (int i = 0; i < data.length; i++) {
       state[i % 25] ^= data[i];
     }
     
-    // Permutation simulation (simplified)
     for (int i = 0; i < 24; i++) {
       for (int j = 0; j < 25; j++) {
         state[j] = (state[j] * 31 + i) & 0xFF;
       }
     }
     
-    // Squeeze phase
     for (int i = 0; i < 64; i++) {
       hash[i] = state[i % 25];
     }
     
     return hash;
   }
-
-  // ===============================
-  // HELPER METHODS
-  // ===============================
 
   Uint8List _generateSalt(int length) {
     final random = Random.secure();
@@ -236,7 +198,6 @@ class CryptoAuthWeb {
   }
 }
 
-// Data models (sama dengan sebelumnya)
 class Argon2HashResult {
   final String hash;
   final String salt;

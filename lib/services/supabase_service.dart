@@ -352,88 +352,98 @@ class SupabaseService {
     return '${(bytes / pow(1024, i)).toStringAsFixed(1)} ${suffixes[i]}';
   }
 
-
-Future<String> uploadEncryptedFile({
-  required Uint8List fileData,
-  required String fileName,
-  required String chatId,
-  required String mimeType,
-}) async {
-  if (!isAvailable) {
-    throw Exception('Supabase not available');
-  }
-
-  try {
-    if (kDebugMode) {
-      debugPrint('📤 Uploading encrypted file: $fileName');
+  Future<String> uploadEncryptedFile({
+    required Uint8List fileData,
+    required String fileName,
+    required String chatId,
+    required String mimeType,
+  }) async {
+    if (!isAvailable) {
+      throw Exception('Supabase not available');
     }
 
-    final filePath = '${DateTime.now().millisecondsSinceEpoch}_$fileName';
-    
-    // ✅ Gunakan bucket 'encrypted_files'
-    await client.storage
-        .from('encrypted_files')
-        .uploadBinary(filePath, fileData);
-
-    if (kDebugMode) {
-      debugPrint('✅ File uploaded successfully: $filePath');
-    }
-
-    return filePath;
-  } catch (e) {
-    if (kDebugMode) {
-      debugPrint('❌ File upload error: $e');
-    }
-    
-    // Fallback ke local storage
-    final localFile = await saveFileToLocation(
-      data: fileData,
-      fileName: fileName,
-      locationType: 'temp',
-    );
-    
-    return 'local://${localFile.path}';
-  }
-}
-
-/// Download encrypted file - PERBAIKAN
-Future<Uint8List> downloadEncryptedFile(String filePath) async {
-  if (!isAvailable) {
-    throw Exception('Supabase not available');
-  }
-
-  try {
-    if (kDebugMode) {
-      debugPrint('📥 Downloading encrypted file: $filePath');
-    }
-
-    if (filePath.startsWith('local://')) {
-      final localPath = filePath.replaceFirst('local://', '');
-      final file = File(localPath);
-      if (await file.exists()) {
-        return await file.readAsBytes();
-      } else {
-        throw Exception('Local file not found: $localPath');
+    try {
+      if (kDebugMode) {
+        debugPrint('📤 Uploading encrypted file: $fileName');
       }
-    }
 
-    // ✅ Gunakan bucket 'encrypted_files'
-    final response = await client.storage
-        .from('encrypted_files')
-        .download(filePath);
+      final filePath = '${DateTime.now().millisecondsSinceEpoch}_$fileName';
+      
+      // ✅ Gunakan bucket 'encrypted_files'
+      await client.storage
+          .from('encrypted_files')
+          .uploadBinary(filePath, fileData);
 
-    if (kDebugMode) {
-      debugPrint('✅ File downloaded successfully: ${response.length} bytes');
-    }
+      if (kDebugMode) {
+        debugPrint('✅ File uploaded successfully: $filePath');
+      }
 
-    return response;
-  } catch (e) {
-    if (kDebugMode) {
-      debugPrint('❌ File download error: $e');
+      return filePath;
+    } catch (e) {
+      if (kDebugMode) {
+        debugPrint('❌ File upload error: $e');
+      }
+      
+      // Fallback ke local storage
+      final localFile = await saveFileToLocation(
+        data: fileData,
+        fileName: fileName,
+        locationType: 'temp',
+      );
+      
+      return 'local://${localFile.path}';
     }
-    return Uint8List(0);
   }
-}
+
+  /// Download encrypted file - PERBAIKAN
+  Future<Uint8List> downloadEncryptedFile(String filePath) async {
+    try {
+      if (kDebugMode) {
+        debugPrint('📥 Downloading encrypted file: $filePath');
+      }
+
+      // Handle local file paths
+      if (filePath.startsWith('local://')) {
+        final localPath = filePath.replaceFirst('local://', '');
+        final file = File(localPath);
+        
+        if (await file.exists()) {
+          final data = await file.readAsBytes();
+          if (kDebugMode) {
+            debugPrint('✅ Local file downloaded: ${data.length} bytes');
+          }
+          return data;
+        } else {
+          if (kDebugMode) {
+            debugPrint('❌ Local file not found: $localPath');
+          }
+          throw Exception('Local file not found: $localPath');
+        }
+      }
+
+      // Handle Supabase storage paths
+      if (!isAvailable) {
+        throw Exception('Supabase not available');
+      }
+
+      final response = await client.storage
+          .from('encrypted_files')
+          .download(filePath);
+
+      if (kDebugMode) {
+        debugPrint('✅ Supabase file downloaded: ${response.length} bytes');
+      }
+
+      return response;
+    } catch (e) {
+      if (kDebugMode) {
+        debugPrint('❌ File download error: $e');
+      }
+      
+      // Return empty bytes instead of throwing to allow debugging
+      return Uint8List(0);
+    }
+  }
 
   /// Save file message ke database
   Future<Map<String, dynamic>> sendFileMessage({
