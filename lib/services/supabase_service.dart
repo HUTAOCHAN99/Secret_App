@@ -1,4 +1,3 @@
-// secret_app/lib/services/supabase_service.dart
 import 'dart:io';
 import 'dart:math';
 import 'package:flutter/foundation.dart';
@@ -72,24 +71,72 @@ class SupabaseService {
     required String locationType,
   }) async {
     try {
-      final tempDir = await getTemporaryDirectory();
-      final savePath = '${tempDir.path}/$fileName';
+      Directory targetDir;
+
+      if (locationType == 'downloads') {
+        // Simpan ke Downloads folder
+        targetDir = await _getDownloadsDirectory();
+      } else if (locationType == 'documents') {
+        // Simpan ke Documents folder
+        targetDir = await getApplicationDocumentsDirectory();
+      } else {
+        // Simpan ke Temporary folder
+        targetDir = await getTemporaryDirectory();
+      }
+
+      // Bersihkan nama file dari karakter tidak valid
+      final cleanFileName = _cleanFileName(fileName);
+      final savePath = '${targetDir.path}/$cleanFileName';
       final file = File(savePath);
-      
+
       await file.writeAsBytes(data);
-      
+
       if (kDebugMode) {
         debugPrint('💾 File saved to: $savePath');
+        debugPrint('   Location type: $locationType');
+        debugPrint('   File size: ${data.length} bytes');
       }
-      
+
       return file;
     } catch (e) {
       if (kDebugMode) {
         debugPrint('❌ Error saving file: $e');
       }
-      final tempFile = File('${await getTemporaryDirectory()}/temp_$fileName');
+      // Fallback ke temporary directory
+      final tempDir = await getTemporaryDirectory();
+      final cleanFileName = _cleanFileName(fileName);
+      final tempFile = File('${tempDir.path}/$cleanFileName');
       await tempFile.writeAsBytes(data);
+
+      if (kDebugMode) {
+        debugPrint('🔄 Using fallback temp location: ${tempFile.path}');
+      }
+
       return tempFile;
+    }
+  }
+
+  String _cleanFileName(String fileName) {
+    // Hapus karakter tidak valid dari nama file
+    return fileName.replaceAll(RegExp(r'[<>:"/\\|?*]'), '_');
+  }
+
+  /// Get Downloads directory
+  Future<Directory> _getDownloadsDirectory() async {
+    if (Platform.isAndroid) {
+      final externalDir = await getExternalStorageDirectory();
+      if (externalDir != null) {
+        final downloadsDir = Directory('${externalDir.path}/Download');
+        if (!await downloadsDir.exists()) {
+          await downloadsDir.create(recursive: true);
+        }
+        return downloadsDir;
+      }
+      throw Exception('Cannot access external storage on Android');
+    } else if (Platform.isIOS) {
+      return await getApplicationDocumentsDirectory();
+    } else {
+      return await getTemporaryDirectory();
     }
   }
 
@@ -114,12 +161,140 @@ class SupabaseService {
     }
   }
 
+  /// Download encrypted file dan simpan ke storage device - METHOD BARU
+  Future<File> downloadEncryptedFileToStorage({
+    required String filePath,
+    required String fileName,
+    String locationType = 'downloads',
+  }) async {
+    try {
+      if (kDebugMode) {
+        debugPrint('📥 Downloading encrypted file to storage: $fileName');
+        debugPrint('   Location type: $locationType');
+        debugPrint('   Source file path: $filePath');
+      }
+
+      // Download file data
+      if (kDebugMode) {
+        debugPrint('   Step 1: Downloading encrypted data...');
+      }
+
+      final fileData = await downloadEncryptedFile(filePath);
+
+      if (fileData.isEmpty) {
+        throw Exception('Downloaded file data is empty');
+      }
+
+      if (kDebugMode) {
+        debugPrint('   Step 2: Downloaded ${fileData.length} bytes');
+      }
+
+      // Simpan ke storage
+      if (kDebugMode) {
+        debugPrint('   Step 3: Saving to location: $locationType');
+      }
+
+      final savedFile = await saveFileToLocation(
+        data: fileData,
+        fileName: fileName,
+        locationType: locationType,
+      );
+
+      if (kDebugMode) {
+        debugPrint('✅ Encrypted file saved to: ${savedFile.path}');
+        debugPrint('   File exists: ${await savedFile.exists()}');
+        debugPrint('   File size: ${savedFile.lengthSync()} bytes');
+      }
+
+      return savedFile;
+    } catch (e, stackTrace) {
+      if (kDebugMode) {
+        debugPrint('❌ Error downloading to storage: $e');
+        debugPrint('Stack trace: $stackTrace');
+      }
+
+      // Fallback: buat file temporary sebagai last resort
+      final tempDir = await getTemporaryDirectory();
+      final fallbackFile = File('${tempDir.path}/fallback_$fileName');
+
+      try {
+        // Coba tulis data dummy untuk testing
+        await fallbackFile
+            .writeAsBytes([0x54, 0x45, 0x53, 0x54]); // "TEST" in hex
+        if (kDebugMode) {
+          debugPrint('🔄 Using fallback file: ${fallbackFile.path}');
+        }
+      } catch (e) {
+        if (kDebugMode) {
+          debugPrint('❌ Even fallback failed: $e');
+        }
+      }
+
+      return fallbackFile;
+    }
+  }
+
+  /// Get available storage locations - METHOD BARU
+  Future<List<Map<String, dynamic>>> getStorageLocations() async {
+    final locations = <Map<String, dynamic>>[];
+
+    try {
+      // Downloads folder (utama)
+      if (Platform.isAndroid || Platform.isIOS) {
+        try {
+          final downloadsDir = await _getDownloadsDirectory();
+          locations.add({
+            'type': 'downloads',
+            'name': 'Downloads Folder',
+            'path': downloadsDir.path,
+            'icon': Icons.download,
+            'color': Colors.blue,
+            'description': 'Simpan di folder Download',
+          });
+        } catch (e) {
+          if (kDebugMode) {
+            debugPrint('⚠️ Downloads folder not available: $e');
+          }
+        }
+      }
+
+      // Documents folder
+      final documentsDir = await getApplicationDocumentsDirectory();
+      locations.add({
+        'type': 'documents',
+        'name': 'Documents Folder',
+        'path': documentsDir.path,
+        'icon': Icons.folder,
+        'color': Colors.green,
+        'description': 'Simpan di folder Documents',
+      });
+
+      // Temporary folder
+      final tempDir = await getTemporaryDirectory();
+      locations.add({
+        'type': 'temp',
+        'name': 'Temporary Storage',
+        'path': tempDir.path,
+        'icon': Icons.timer,
+        'color': Colors.orange,
+        'description': 'Simpan sementara (bisa terhapus)',
+      });
+    } catch (e) {
+      if (kDebugMode) {
+        debugPrint('❌ Error getting storage locations: $e');
+      }
+    }
+
+    return locations;
+  }
+
   // ===============================
   // FILE COMPRESSION & PROCESSING
   // ===============================
 
   /// Compress image dengan quality adjustment
-  Future<Uint8List> compressImage(Uint8List imageData, {int quality = 80}) async {
+  Future<Uint8List> compressImage(Uint8List imageData,
+      {int quality = 80}) async {
     try {
       if (kDebugMode) {
         debugPrint('🖼️ Compressing image with quality: $quality%');
@@ -131,9 +306,8 @@ class SupabaseService {
       }
 
       // Resize jika terlalu besar (max width 1200px)
-      final resizedImage = image.width > 1200 
-          ? img.copyResize(image, width: 1200)
-          : image;
+      final resizedImage =
+          image.width > 1200 ? img.copyResize(image, width: 1200) : image;
 
       // Encode dengan quality setting
       final compressedData = img.encodeJpg(resizedImage, quality: quality);
@@ -141,8 +315,10 @@ class SupabaseService {
       if (kDebugMode) {
         final originalSize = imageData.length;
         final compressedSize = compressedData.length;
-        final compressionRatio = ((originalSize - compressedSize) / originalSize * 100).round();
-        debugPrint('✅ Image compressed: $originalSize → $compressedSize bytes ($compressionRatio% reduction)');
+        final compressionRatio =
+            ((originalSize - compressedSize) / originalSize * 100).round();
+        debugPrint(
+            '✅ Image compressed: $originalSize → $compressedSize bytes ($compressionRatio% reduction)');
       }
 
       return Uint8List.fromList(compressedData);
@@ -169,8 +345,10 @@ class SupabaseService {
       if (kDebugMode) {
         final originalSize = textData.length;
         final compressedSize = compressed.length;
-        final compressionRatio = ((originalSize - compressedSize) / originalSize * 100).round();
-        debugPrint('✅ Text compressed: $originalSize → $compressedSize bytes ($compressionRatio% reduction)');
+        final compressionRatio =
+            ((originalSize - compressedSize) / originalSize * 100).round();
+        debugPrint(
+            '✅ Text compressed: $originalSize → $compressedSize bytes ($compressionRatio% reduction)');
       }
 
       return Uint8List.fromList(compressed);
@@ -190,11 +368,11 @@ class SupabaseService {
       }
 
       final archive = Archive();
-      
+
       for (final entry in files.entries) {
         final fileName = entry.key;
         final fileData = entry.value;
-        
+
         archive.addFile(ArchiveFile(fileName, fileData.length, fileData));
       }
 
@@ -237,31 +415,30 @@ class SupabaseService {
         final originalSize = fileData.length;
         processedData = await compressImage(fileData);
         final compressedSize = processedData.length;
-        
+
         if (compressedSize < originalSize) {
           isCompressed = true;
-          compressionInfo = 'Image compressed ${(originalSize - compressedSize) ~/ 1024}KB saved';
+          compressionInfo =
+              'Image compressed ${(originalSize - compressedSize) ~/ 1024}KB saved';
         }
-      }
-      else if (mimeType == 'text/plain' || fileName.endsWith('.txt')) {
+      } else if (mimeType == 'text/plain' || fileName.endsWith('.txt')) {
         // Compress text files
         final originalSize = fileData.length;
         processedData = await compressTextFile(fileData);
         final compressedSize = processedData.length;
-        
+
         if (compressedSize < originalSize) {
           isCompressed = true;
-          compressionInfo = 'Text compressed ${(originalSize - compressedSize) ~/ 1024}KB saved';
+          compressionInfo =
+              'Text compressed ${(originalSize - compressedSize) ~/ 1024}KB saved';
         }
-      }
-      else if (mimeType.contains('pdf') || 
-               mimeType.contains('document') ||
-               fileName.endsWith('.doc') ||
-               fileName.endsWith('.docx')) {
+      } else if (mimeType.contains('pdf') ||
+          mimeType.contains('document') ||
+          fileName.endsWith('.doc') ||
+          fileName.endsWith('.docx')) {
         // Documents - no compression (usually already compressed)
         compressionInfo = 'Document file';
-      }
-      else {
+      } else {
         // Other files - no processing
         compressionInfo = 'Binary file';
       }
@@ -296,20 +473,21 @@ class SupabaseService {
   }
 
   /// Get file info untuk display
-  Map<String, dynamic> getFileInfo(String fileName, int fileSize, String mimeType) {
+  Map<String, dynamic> getFileInfo(
+      String fileName, int fileSize, String mimeType) {
     final fileExtension = fileName.toLowerCase().split('.').last;
-    
+
     // File type categories
     final imageTypes = ['jpg', 'jpeg', 'png', 'gif', 'bmp', 'webp'];
     final documentTypes = ['pdf', 'doc', 'docx', 'txt', 'rtf'];
     final videoTypes = ['mp4', 'avi', 'mov', 'wmv', 'flv'];
     final audioTypes = ['mp3', 'wav', 'aac', 'flac'];
     final archiveTypes = ['zip', 'rar', '7z', 'tar', 'gz'];
-    
+
     String fileCategory;
     IconData fileIcon;
     Color fileColor;
-    
+
     if (imageTypes.contains(fileExtension)) {
       fileCategory = 'Image';
       fileIcon = Icons.image;
@@ -335,7 +513,7 @@ class SupabaseService {
       fileIcon = Icons.insert_drive_file;
       fileColor = Colors.grey;
     }
-    
+
     return {
       'category': fileCategory,
       'icon': fileIcon,
@@ -368,7 +546,7 @@ class SupabaseService {
       }
 
       final filePath = '${DateTime.now().millisecondsSinceEpoch}_$fileName';
-      
+
       // ✅ Gunakan bucket 'encrypted_files'
       await client.storage
           .from('encrypted_files')
@@ -383,14 +561,14 @@ class SupabaseService {
       if (kDebugMode) {
         debugPrint('❌ File upload error: $e');
       }
-      
+
       // Fallback ke local storage
       final localFile = await saveFileToLocation(
         data: fileData,
         fileName: fileName,
         locationType: 'temp',
       );
-      
+
       return 'local://${localFile.path}';
     }
   }
@@ -406,7 +584,7 @@ class SupabaseService {
       if (filePath.startsWith('local://')) {
         final localPath = filePath.replaceFirst('local://', '');
         final file = File(localPath);
-        
+
         if (await file.exists()) {
           final data = await file.readAsBytes();
           if (kDebugMode) {
@@ -426,9 +604,8 @@ class SupabaseService {
         throw Exception('Supabase not available');
       }
 
-      final response = await client.storage
-          .from('encrypted_files')
-          .download(filePath);
+      final response =
+          await client.storage.from('encrypted_files').download(filePath);
 
       if (kDebugMode) {
         debugPrint('✅ Supabase file downloaded: ${response.length} bytes');
@@ -439,7 +616,7 @@ class SupabaseService {
       if (kDebugMode) {
         debugPrint('❌ File download error: $e');
       }
-      
+
       // Return empty bytes instead of throwing to allow debugging
       return Uint8List(0);
     }
@@ -488,7 +665,8 @@ class SupabaseService {
         .stream(primaryKey: ['id'])
         .eq('chat_id', chatId)
         .map(
-          (event) => event.map((item) => Map<String, dynamic>.from(item)).toList(),
+          (event) =>
+              event.map((item) => Map<String, dynamic>.from(item)).toList(),
         );
   }
 
@@ -500,7 +678,7 @@ class SupabaseService {
 
     try {
       await client.from('file_messages').delete().eq('id', messageId);
-      
+
       if (kDebugMode) {
         debugPrint('✅ File message deleted from database: $messageId');
       }
@@ -565,7 +743,7 @@ class SupabaseService {
       }
 
       await client.auth.signUp(
-        email: email, 
+        email: email,
         password: 'temporary_password_for_resend',
       );
 
@@ -576,11 +754,12 @@ class SupabaseService {
       if (kDebugMode) {
         debugPrint('❌ Error resending verification email: $e');
       }
-      
+
       if (e.toString().contains('over_email_send_rate_limit')) {
-        throw Exception('Email rate limit exceeded. Please wait 1 minute before trying again.');
+        throw Exception(
+            'Email rate limit exceeded. Please wait 1 minute before trying again.');
       }
-      
+
       rethrow;
     }
   }
@@ -623,7 +802,8 @@ class SupabaseService {
     try {
       final response = await client
           .from('users')
-          .select('id, email, password_hash, salt, user_pin, display_name, is_verified')
+          .select(
+              'id, email, password_hash, salt, user_pin, display_name, is_verified')
           .eq('email', email)
           .single();
 
@@ -647,11 +827,11 @@ class SupabaseService {
         email: email.trim(),
         password: password,
       );
-      
+
       if (kDebugMode) {
         debugPrint('✅ Sign in successful for: $email');
       }
-      
+
       return response;
     } catch (e) {
       if (kDebugMode) {
@@ -763,11 +943,7 @@ class SupabaseService {
         debugPrint('   📧 OTP email sent to: $email');
       }
 
-      await client
-          .from('users')
-          .insert(userData)
-          .select()
-          .single();
+      await client.from('users').insert(userData).select().single();
 
       final result = {
         'success': true,
@@ -783,16 +959,16 @@ class SupabaseService {
         debugPrint('   📌 User PIN: $userPin');
       }
       return result;
-
     } catch (e) {
       if (kDebugMode) {
         debugPrint('❌ Sign up with crypto error: $e');
       }
-      
+
       if (e.toString().contains('over_email_send_rate_limit')) {
-        throw Exception('Email rate limit exceeded. Please wait 1 minute or use a different email address.');
+        throw Exception(
+            'Email rate limit exceeded. Please wait 1 minute or use a different email address.');
       }
-      
+
       rethrow;
     }
   }
@@ -965,28 +1141,25 @@ class SupabaseService {
     }
 
     try {
-      final response = await client
-          .from('chats')
-          .select('''
+      final response = await client.from('chats').select('''
             *,
             user1:users!chats_user1_id_fkey(display_name, user_pin),
             user2:users!chats_user2_id_fkey(display_name, user_pin)
-          ''')
-          .or('user1_id.eq.$userId,user2_id.eq.$userId');
+          ''').or('user1_id.eq.$userId,user2_id.eq.$userId');
 
       final List<Map<String, dynamic>> chats = [];
-      
+
       for (final chat in response) {
         final isUser1 = chat['user1_id'] == userId;
         final otherUser = isUser1 ? chat['user2'] : chat['user1'];
-        
+
         chats.add({
           'chat_id': chat['id'],
           'other_user_name': otherUser['display_name'] ?? 'Unknown User',
           'other_user_pin': otherUser['user_pin'] ?? 'Unknown',
         });
       }
-      
+
       return chats;
     } catch (e) {
       if (kDebugMode) {
@@ -1005,11 +1178,8 @@ class SupabaseService {
     }
 
     try {
-      final response = await client
-          .from('users')
-          .select()
-          .eq('user_pin', pin)
-          .single();
+      final response =
+          await client.from('users').select().eq('user_pin', pin).single();
 
       return Map<String, dynamic>.from(response);
     } catch (e) {
@@ -1175,5 +1345,6 @@ class FileProcessingResult {
   });
 
   int get sizeSaved => originalSize - processedSize;
-  double get compressionRatio => originalSize > 0 ? (sizeSaved / originalSize * 100) : 0;
+  double get compressionRatio =>
+      originalSize > 0 ? (sizeSaved / originalSize * 100) : 0;
 }

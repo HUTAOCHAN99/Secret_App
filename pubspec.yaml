@@ -24,6 +24,7 @@ dependencies:
   pointycastle: ^3.7.3
   permission_handler: ^12.0.1
   file_picker: ^10.3.3
+  image_picker: ^1.0.4
   archive: ^4.0.7
   path_provider: ^2.1.5
   image: ^4.5.4

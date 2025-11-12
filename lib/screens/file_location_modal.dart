@@ -1,4 +1,7 @@
+// secret_app/lib/screens/file_location_modal.dart
 import 'package:flutter/material.dart';
+import 'package:provider/provider.dart';
+import '../services/supabase_service.dart';
 
 class FileLocationModal extends StatefulWidget {
   final String fileName;
@@ -7,7 +10,7 @@ class FileLocationModal extends StatefulWidget {
   const FileLocationModal({
     super.key,
     required this.fileName,
-    this.isUpload = true,
+    required this.isUpload,
   });
 
   @override
@@ -15,84 +18,211 @@ class FileLocationModal extends StatefulWidget {
 }
 
 class _FileLocationModalState extends State<FileLocationModal> {
-  String _selectedLocation = 'app_documents';
-  final Map<String, String> _locationNames = {
-    'app_documents': 'Penyimpanan Internal',
-    'external_storage': 'Penyimpanan Eksternal',
-    'downloads': 'Folder Downloads',
-    'temp': 'Penyimpanan Sementara',
-  };
+  List<Map<String, dynamic>> _storageLocations = [];
+  bool _isLoading = true;
+
+  @override
+  void initState() {
+    super.initState();
+    _loadStorageLocations();
+  }
+
+  Future<void> _loadStorageLocations() async {
+    try {
+      final supabaseService = SupabaseService();
+      final locations = await supabaseService.getStorageLocations();
+      
+      setState(() {
+        _storageLocations = locations;
+        _isLoading = false;
+      });
+    } catch (e) {
+      if (mounted) {
+        setState(() {
+          _isLoading = false;
+        });
+      }
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
-    return AlertDialog(
-      title: Text(
-        widget.isUpload 
-            ? 'Upload File: ${widget.fileName}'
-            : 'Simpan File: ${widget.fileName}',
+    return Dialog(
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(16.0),
       ),
-      content: Column(
-        mainAxisSize: MainAxisSize.min,
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Text(
-            widget.isUpload
-                ? 'Pilih file dari:'
-                : 'Simpan file ke:',
-            style: const TextStyle(
-              fontWeight: FontWeight.w500,
-              fontSize: 16,
+      child: Container(
+        constraints: const BoxConstraints(maxWidth: 400, maxHeight: 500),
+        padding: const EdgeInsets.all(20.0),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            // Header
+            Row(
+              children: [
+                Icon(
+                  widget.isUpload ? Icons.upload : Icons.download,
+                  color: Theme.of(context).colorScheme.primary,
+                  size: 24,
+                ),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: Text(
+                    widget.isUpload 
+                      ? 'Pilih Sumber File' 
+                      : 'Pilih Lokasi Simpan',
+                    style: const TextStyle(
+                      fontSize: 18,
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
+                ),
+                IconButton(
+                  icon: const Icon(Icons.close),
+                  onPressed: () => Navigator.pop(context),
+                ),
+              ],
             ),
-          ),
-          const SizedBox(height: 16),
-          ..._locationNames.entries.map((entry) {
-            return RadioListTile<String>(
-              title: Text(entry.value),
-              value: entry.key,
-              groupValue: _selectedLocation,
-              onChanged: (value) {
-                setState(() {
-                  _selectedLocation = value!;
-                });
-              },
-            );
-          }).toList(),
-          const SizedBox(height: 8),
-          Text(
-            _getLocationDescription(_selectedLocation),
-            style: TextStyle(
-              fontSize: 12,
-              color: Colors.grey[600],
-              fontStyle: FontStyle.italic,
+            
+            const SizedBox(height: 8),
+            
+            // File Info
+            Container(
+              width: double.infinity,
+              padding: const EdgeInsets.all(12),
+              decoration: BoxDecoration(
+                color: Colors.grey[50],
+                borderRadius: BorderRadius.circular(8),
+              ),
+              child: Row(
+                children: [
+                  Icon(
+                    Icons.insert_drive_file,
+                    color: Colors.grey[600],
+                    size: 20,
+                  ),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          widget.fileName,
+                          style: const TextStyle(
+                            fontWeight: FontWeight.w500,
+                          ),
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                        Text(
+                          widget.isUpload
+                            ? 'Pilih dari mana file akan diupload'
+                            : 'Pilih dimana file akan disimpan',
+                          style: TextStyle(
+                            fontSize: 12,
+                            color: Colors.grey[600],
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ],
+              ),
             ),
-          ),
-        ],
+            
+            const SizedBox(height: 20),
+            
+            // Storage Locations
+            Expanded(
+              child: _isLoading
+                  ? const Center(child: CircularProgressIndicator())
+                  : _storageLocations.isEmpty
+                      ? const Center(
+                          child: Column(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              Icon(Icons.storage, size: 48, color: Colors.grey),
+                              SizedBox(height: 16),
+                              Text(
+                                'Tidak ada lokasi penyimpanan tersedia',
+                                textAlign: TextAlign.center,
+                                style: TextStyle(color: Colors.grey),
+                              ),
+                            ],
+                          ),
+                        )
+                      : ListView(
+                          shrinkWrap: true,
+                          children: _storageLocations.map((location) => _buildLocationCard(location)).toList(),
+                        ),
+            ),
+            
+            const SizedBox(height: 16),
+            
+            // Cancel Button
+            SizedBox(
+              width: double.infinity,
+              child: OutlinedButton(
+                onPressed: () => Navigator.pop(context),
+                child: const Text('Batal'),
+              ),
+            ),
+          ],
+        ),
       ),
-      actions: [
-        TextButton(
-          onPressed: () => Navigator.pop(context),
-          child: const Text('Batal'),
-        ),
-        ElevatedButton(
-          onPressed: () => Navigator.pop(context, _selectedLocation),
-          child: Text(widget.isUpload ? 'Pilih File' : 'Simpan'),
-        ),
-      ],
     );
   }
 
-  String _getLocationDescription(String location) {
-    switch (location) {
-      case 'app_documents':
-        return 'File disimpan di folder aplikasi (aman, tidak terlihat user lain)';
-      case 'external_storage':
-        return 'File disimpan di penyimpanan perangkat (bisa diakses file manager)';
-      case 'downloads':
-        return 'File disimpan di folder Downloads (mudah ditemukan)';
-      case 'temp':
-        return 'File disimpan sementara (bisa terhapus oleh sistem)';
-      default:
-        return '';
-    }
+  Widget _buildLocationCard(Map<String, dynamic> location) {
+    final type = location['type'] as String;
+    final name = location['name'] as String;
+    final path = location['path'] as String;
+    final icon = location['icon'] as IconData;
+    final color = location['color'] as Color;
+    final description = location['description'] as String?;
+
+    return Card(
+      margin: const EdgeInsets.only(bottom: 12),
+      child: ListTile(
+        leading: Container(
+          width: 40,
+          height: 40,
+          decoration: BoxDecoration(
+            color: color.withAlpha(30),
+            shape: BoxShape.circle,
+          ),
+          child: Icon(icon, color: color),
+        ),
+        title: Text(
+          name,
+          style: const TextStyle(fontWeight: FontWeight.w500),
+        ),
+        subtitle: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            if (description != null)
+              Text(
+                description,
+                style: const TextStyle(fontSize: 12),
+              ),
+            const SizedBox(height: 4),
+            Text(
+              path,
+              style: TextStyle(
+                fontSize: 10,
+                color: Colors.grey[600],
+                fontFamily: 'Monospace',
+              ),
+              overflow: TextOverflow.ellipsis,
+              maxLines: 1,
+            ),
+          ],
+        ),
+        trailing: const Icon(Icons.chevron_right),
+        onTap: () {
+          Navigator.pop(context, location); // Return Map, bukan String
+        },
+      ),
+    );
   }
 }

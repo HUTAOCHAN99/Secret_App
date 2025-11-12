@@ -14,6 +14,7 @@ import '../services/encryption_service.dart';
 import '../services/file_encryption_service.dart';
 import 'file_location_modal.dart';
 import 'file_decryption_modal.dart';
+import 'steganography_modal.dart';
 
 class ChatScreen extends StatefulWidget {
   final String chatId;
@@ -431,59 +432,565 @@ class _ChatScreenState extends State<ChatScreen> {
     }
   }
 
-  Future<void> _sendMessage() async {
-    final message = _messageController.text.trim();
-    if (message.isEmpty || _isSending) return;
+  // ===============================
+  // STEGANOGRAPHY FEATURE
+  // ===============================
 
-    final authProvider = Provider.of<AuthProvider>(context, listen: false);
+  void _showSteganographyModal() {
+    Navigator.of(context).push(
+      MaterialPageRoute(
+        builder: (context) => SteganographyModal(
+          chatId: widget.chatId,
+          encryptionKey: _encryptionKey,
+        ),
+      ),
+    );
+  }
 
+  // ===============================
+  // COPY MESSAGE FEATURES
+  // ===============================
+
+  /// Copy message text to clipboard
+  void _copyMessageToClipboard(String messageText) {
     try {
-      if (kDebugMode) {
-        debugPrint('📤 Sending message: "$message"');
-      }
+      Clipboard.setData(ClipboardData(text: messageText));
 
-      setState(() {
-        _isSending = true;
-      });
-
-      final encryptionService = EncryptionService();
-      final encryptionResult =
-          await encryptionService.encryptMessage(message, _encryptionKey);
-
-      final supabaseService = SupabaseService();
-      await supabaseService.sendEncryptedMessage(
-        chatId: widget.chatId,
-        senderId: authProvider.user!.id,
-        encryptedMessage: encryptionResult['encrypted_message'] as String,
-        iv: encryptionResult['iv'] as String,
-      );
-
-      _messageController.clear();
-
-      if (kDebugMode) {
-        debugPrint('✅ Message sent and encrypted successfully');
-      }
-    } catch (e) {
-      if (kDebugMode) {
-        debugPrint('❌ Failed to send message: $e');
-      }
+      // Show success feedback
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
-            content: Text('Failed to send message: ${e.toString()}'),
+            content: const Text('Pesan disalin ke clipboard'),
+            backgroundColor: Colors.green,
+            duration: const Duration(seconds: 2),
+            behavior: SnackBarBehavior.floating,
+            action: SnackBarAction(
+              label: 'OK',
+              textColor: Colors.white,
+              onPressed: () {
+                ScaffoldMessenger.of(context).hideCurrentSnackBar();
+              },
+            ),
+          ),
+        );
+      }
+
+      if (kDebugMode) {
+        debugPrint('📋 Message copied to clipboard: "$messageText"');
+      }
+    } catch (e) {
+      if (kDebugMode) {
+        debugPrint('❌ Error copying message: $e');
+      }
+
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Gagal menyalin pesan: ${e.toString()}'),
+            backgroundColor: Colors.red,
+          ),
+        );
+      }
+    }
+  }
+
+  /// Copy file info to clipboard
+  void _copyFileInfoToClipboard(Map<String, dynamic> fileMessage) {
+    try {
+      final fileName = fileMessage['file_name'] as String;
+      final fileSize = fileMessage['file_size'] as int;
+      final mimeType = fileMessage['mime_type'] as String;
+      final createdAt = fileMessage['created_at'] as String;
+
+      final supabaseService = SupabaseService();
+      final fileInfo =
+          supabaseService.getFileInfo(fileName, fileSize, mimeType);
+
+      final fileInfoText = '''
+File Information:
+📄 Name: $fileName
+📁 Type: ${fileInfo['category']}
+🔤 Extension: ${fileInfo['extension']}
+📊 Size: ${fileInfo['size_formatted']}
+🎯 MIME: $mimeType
+🕒 Created: ${_formatDateTime(createdAt)}
+''';
+
+      Clipboard.setData(ClipboardData(text: fileInfoText));
+
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: const Text('Info file disalin ke clipboard'),
+            backgroundColor: Colors.green,
+            duration: const Duration(seconds: 2),
+          ),
+        );
+      }
+
+      if (kDebugMode) {
+        debugPrint('📋 File info copied to clipboard');
+      }
+    } catch (e) {
+      if (kDebugMode) {
+        debugPrint('❌ Error copying file info: $e');
+      }
+    }
+  }
+
+  /// Show context menu for text messages
+  void _showMessageContextMenu(Map<String, dynamic> message, bool isMe) {
+    final messageText = message['message'] as String;
+
+    showModalBottomSheet(
+      context: context,
+      builder: (context) => SafeArea(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            ListTile(
+              leading: const Icon(Icons.content_copy, color: Colors.blue),
+              title: const Text('Salin Pesan'),
+              subtitle: Text(
+                messageText.length > 50
+                    ? '${messageText.substring(0, 50)}...'
+                    : messageText,
+                style: const TextStyle(fontSize: 12),
+              ),
+              onTap: () {
+                Navigator.pop(context);
+                _copyMessageToClipboard(messageText);
+              },
+            ),
+            ListTile(
+              leading: const Icon(Icons.share, color: Colors.green),
+              title: const Text('Bagikan Pesan'),
+              onTap: () {
+                Navigator.pop(context);
+                _shareMessage(messageText);
+              },
+            ),
+            ListTile(
+              leading: const Icon(Icons.info, color: Colors.grey),
+              title: const Text('Info Pesan'),
+              onTap: () {
+                Navigator.pop(context);
+                _showMessageInfo(message);
+              },
+            ),
+            const SizedBox(height: 8),
+            Container(
+              width: double.infinity,
+              padding: const EdgeInsets.symmetric(horizontal: 16),
+              child: OutlinedButton(
+                onPressed: () => Navigator.pop(context),
+                child: const Text('Batal'),
+              ),
+            ),
+            const SizedBox(height: 16),
+          ],
+        ),
+      ),
+    );
+  }
+
+  /// Show context menu for file messages
+  void _showFileContextMenu(Map<String, dynamic> fileMessage, bool isMe) {
+    final fileName = fileMessage['file_name'] as String;
+
+    showModalBottomSheet(
+      context: context,
+      builder: (context) => SafeArea(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            ListTile(
+              leading: const Icon(Icons.content_copy, color: Colors.blue),
+              title: const Text('Salin Info File'),
+              subtitle: const Text('Salin detail informasi file'),
+              onTap: () {
+                Navigator.pop(context);
+                _copyFileInfoToClipboard(fileMessage);
+              },
+            ),
+            ListTile(
+              leading: const Icon(Icons.download, color: Colors.green),
+              title: const Text('Download File (Terenkripsi)'),
+              subtitle: const Text('Simpan file dalam bentuk terenkripsi'),
+              onTap: () {
+                Navigator.pop(context);
+                _downloadEncryptedFile(fileMessage); // METHOD YANG DIPERBAIKI
+              },
+            ),
+            ListTile(
+              leading: Icon(
+                isMe ? Icons.verified_user : Icons.lock_open,
+                color: isMe ? Colors.green : Colors.blue,
+              ),
+              title: Text(
+                  isMe ? 'Dekripsi (Owner Access)' : 'Dekripsi (Manual Key)'),
+              onTap: () {
+                Navigator.pop(context);
+                _decryptFile(fileMessage);
+              },
+            ),
+            if (isMe)
+              ListTile(
+                leading: const Icon(Icons.vpn_key, color: Colors.orange),
+                title: const Text('Lihat & Bagikan Kunci'),
+                onTap: () {
+                  Navigator.pop(context);
+                  _showDecryptionKey(fileMessage);
+                },
+              ),
+            if (!isMe)
+              ListTile(
+                leading: const Icon(Icons.vpn_key, color: Colors.orange),
+                title: const Text('Minta Kunci Dekripsi'),
+                onTap: () {
+                  Navigator.pop(context);
+                  _requestDecryptionKey(fileMessage);
+                },
+              ),
+            ListTile(
+              leading: const Icon(Icons.info, color: Colors.grey),
+              title: const Text('Info File Lengkap'),
+              onTap: () {
+                Navigator.pop(context);
+                _showFileInfo(fileMessage);
+              },
+            ),
+            const SizedBox(height: 8),
+            Container(
+              width: double.infinity,
+              padding: const EdgeInsets.symmetric(horizontal: 16),
+              child: OutlinedButton(
+                onPressed: () => Navigator.pop(context),
+                child: const Text('Batal'),
+              ),
+            ),
+            const SizedBox(height: 16),
+          ],
+        ),
+      ),
+    );
+  }
+
+  /// Share message using native share dialog
+  void _shareMessage(String messageText) {
+    try {
+      // For web, we'll use a fallback since Share plugin might not work
+      if (kIsWeb) {
+        _copyMessageToClipboard(messageText);
+        return;
+      }
+
+      // For mobile, use the share functionality
+      // You might want to add the share_plus package for this
+      // Add to pubspec.yaml: share_plus: ^7.0.1
+      // import 'package:share_plus/share_plus.dart';
+
+      // For now, we'll use copy to clipboard as fallback
+      _copyMessageToClipboard(messageText);
+
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Pesan disalin untuk dibagikan'),
+            backgroundColor: Colors.blue,
+          ),
+        );
+      }
+    } catch (e) {
+      if (kDebugMode) {
+        debugPrint('❌ Error sharing message: $e');
+      }
+      _copyMessageToClipboard(messageText);
+    }
+  }
+
+  /// Show detailed message info
+  void _showMessageInfo(Map<String, dynamic> message) {
+    final messageText = message['message'] as String;
+    final messageId = message['id'] as String;
+    final senderId = message['sender_id'] as String;
+    final createdAt = message['created_at'] as String;
+    final authProvider = Provider.of<AuthProvider>(context, listen: false);
+    final isMe = senderId == authProvider.user!.id;
+
+    final messageLength = messageText.length;
+    final wordCount = messageText.split(' ').length;
+    final lineCount = messageText.split('\n').length;
+
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Info Pesan'),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            _buildInfoRow('ID Pesan', messageId),
+            _buildInfoRow('Pengirim', isMe ? 'Anda' : widget.otherUserName),
+            _buildInfoRow('Waktu', _formatDateTime(createdAt)),
+            _buildInfoRow('Panjang Teks', '$messageLength karakter'),
+            _buildInfoRow('Jumlah Kata', '$wordCount kata'),
+            _buildInfoRow('Jumlah Baris', '$lineCount baris'),
+            const SizedBox(height: 16),
+            Container(
+              padding: const EdgeInsets.all(12),
+              decoration: BoxDecoration(
+                color: Colors.green[50],
+                borderRadius: BorderRadius.circular(8),
+              ),
+              child: const Row(
+                children: [
+                  Icon(Icons.verified, color: Colors.green, size: 16),
+                  SizedBox(width: 8),
+                  Expanded(
+                    child: Text(
+                      'Pesan terenkripsi end-to-end',
+                      style: TextStyle(
+                        color: Colors.green,
+                        fontSize: 12,
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text('Tutup'),
+          ),
+          FilledButton(
+            onPressed: () {
+              Navigator.pop(context);
+              _copyMessageToClipboard(messageText);
+            },
+            child: const Text('Salin Pesan'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  // ===============================
+  // DOWNLOAD ENCRYPTED FILE - METHOD YANG DIPERBAIKI
+  // ===============================
+
+  /// Download file terenkripsi dengan pilihan lokasi - METHOD BARU
+  Future<void> _downloadEncryptedFile(Map<String, dynamic> fileMessage) async {
+    try {
+      final fileName = fileMessage['file_name'] as String;
+      final filePath = fileMessage['file_path'] as String;
+
+      if (kDebugMode) {
+        debugPrint('📥 Starting encrypted file download...');
+        debugPrint('   File: $fileName');
+        debugPrint('   Path: $filePath');
+      }
+
+      setState(() {
+        _isUploading = true;
+      });
+
+      // Tampilkan dialog pemilihan lokasi - PERBAIKAN: Gunakan await yang benar
+      final selectedLocation = await showDialog<Map<String, dynamic>>(
+        context: context,
+        builder: (context) => FileLocationModal(
+          fileName: fileName,
+          isUpload: false,
+        ),
+      );
+
+      // Debug: Print selected location
+      if (kDebugMode) {
+        debugPrint('   Selected location: $selectedLocation');
+      }
+
+      if (selectedLocation == null) {
+        if (kDebugMode) {
+          debugPrint('   User cancelled location selection');
+        }
+        setState(() {
+          _isUploading = false;
+        });
+        return;
+      }
+
+      final locationType = selectedLocation['type'] as String? ?? 'downloads';
+      final locationName =
+          selectedLocation['name'] as String? ?? 'Unknown Location';
+
+      if (kDebugMode) {
+        debugPrint('   Selected location type: $locationType');
+        debugPrint('   Selected location name: $locationName');
+      }
+
+      final supabaseService = SupabaseService();
+
+      // Download dan simpan file terenkripsi
+      if (kDebugMode) {
+        debugPrint('   Starting file download process...');
+      }
+
+      final savedFile = await supabaseService.downloadEncryptedFileToStorage(
+        filePath: filePath,
+        fileName: fileName,
+        locationType: locationType,
+      );
+
+      if (kDebugMode) {
+        debugPrint('   File saved successfully: ${savedFile.path}');
+        debugPrint('   File exists: ${await savedFile.exists()}');
+      }
+
+      if (mounted) {
+        setState(() {
+          _isUploading = false;
+        });
+
+        // Tampilkan konfirmasi sukses
+        _showDownloadSuccessDialog(savedFile, fileName, locationName);
+      }
+    } catch (e, stackTrace) {
+      if (kDebugMode) {
+        debugPrint('❌ Encrypted file download error: $e');
+        debugPrint('Stack trace: $stackTrace');
+      }
+
+      if (mounted) {
+        setState(() {
+          _isUploading = false;
+        });
+
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Gagal download file: ${e.toString()}'),
             backgroundColor: Colors.red,
             duration: const Duration(seconds: 5),
           ),
         );
       }
-    } finally {
-      if (mounted) {
-        setState(() {
-          _isSending = false;
-        });
-      }
     }
   }
+
+  /// Tampilkan dialog sukses download - METHOD BARU
+  void _showDownloadSuccessDialog(
+      File? savedFile, String fileName, String locationName) {
+    // Cek jika file null
+    if (savedFile == null) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content:
+                Text('File berhasil didownload tetapi path tidak tersedia'),
+            backgroundColor: Colors.orange,
+          ),
+        );
+      }
+      return;
+    }
+
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Row(
+          children: [
+            Icon(Icons.download_done, color: Colors.green),
+            SizedBox(width: 8),
+            Text('File Downloaded'),
+          ],
+        ),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              'File "$fileName" berhasil disimpan di:',
+              style: const TextStyle(fontWeight: FontWeight.w500),
+            ),
+            const SizedBox(height: 8),
+            Container(
+              padding: const EdgeInsets.all(12),
+              decoration: BoxDecoration(
+                color: Colors.grey[100],
+                borderRadius: BorderRadius.circular(8),
+              ),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    '📍 $locationName',
+                    style: const TextStyle(
+                      fontWeight: FontWeight.w600,
+                      color: Colors.blue,
+                    ),
+                  ),
+                  const SizedBox(height: 8),
+                  SelectableText(
+                    savedFile.path,
+                    style: const TextStyle(
+                      fontSize: 12,
+                      fontFamily: 'Monospace',
+                      color: Colors.grey,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            const SizedBox(height: 16),
+            Container(
+              padding: const EdgeInsets.all(12),
+              decoration: BoxDecoration(
+                color: Colors.orange[50],
+                borderRadius: BorderRadius.circular(8),
+              ),
+              child: const Row(
+                children: [
+                  Icon(Icons.security, size: 16, color: Colors.orange),
+                  SizedBox(width: 8),
+                  Expanded(
+                    child: Text(
+                      'File masih dalam bentuk terenkripsi. Gunakan fitur dekripsi untuk membuka file.',
+                      style: TextStyle(fontSize: 12),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text('Tutup'),
+          ),
+          FilledButton(
+            onPressed: () {
+              Navigator.pop(context);
+              _copyFileInfoToClipboard({
+                'file_name': fileName,
+                'file_path': savedFile.path,
+                'file_size': savedFile.lengthSync(),
+                'mime_type': 'application/octet-stream',
+                'created_at': DateTime.now().toIso8601String(),
+              });
+            },
+            child: const Text('Salin Info'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  // ===============================
+  // FILE DECRYPTION METHODS
+  // ===============================
 
   /// Decrypt file dengan akses berbeda untuk owner dan receiver
   Future<void> _decryptFile(Map<String, dynamic> fileMessage) async {
@@ -749,7 +1256,7 @@ class _ChatScreenState extends State<ChatScreen> {
               subtitle: const Text('Simpan file dalam bentuk terenkripsi'),
               onTap: () {
                 Navigator.pop(context);
-                _downloadFileWithLocation(fileMessage);
+                _downloadEncryptedFile(fileMessage); // METHOD YANG DIPERBAIKI
               },
             ),
             ListTile(
@@ -812,6 +1319,60 @@ class _ChatScreenState extends State<ChatScreen> {
         ),
       ),
     );
+  }
+
+  Future<void> _sendMessage() async {
+    final message = _messageController.text.trim();
+    if (message.isEmpty || _isSending) return;
+
+    final authProvider = Provider.of<AuthProvider>(context, listen: false);
+
+    try {
+      if (kDebugMode) {
+        debugPrint('📤 Sending message: "$message"');
+      }
+
+      setState(() {
+        _isSending = true;
+      });
+
+      final encryptionService = EncryptionService();
+      final encryptionResult =
+          await encryptionService.encryptMessage(message, _encryptionKey);
+
+      final supabaseService = SupabaseService();
+      await supabaseService.sendEncryptedMessage(
+        chatId: widget.chatId,
+        senderId: authProvider.user!.id,
+        encryptedMessage: encryptionResult['encrypted_message'] as String,
+        iv: encryptionResult['iv'] as String,
+      );
+
+      _messageController.clear();
+
+      if (kDebugMode) {
+        debugPrint('✅ Message sent and encrypted successfully');
+      }
+    } catch (e) {
+      if (kDebugMode) {
+        debugPrint('❌ Failed to send message: $e');
+      }
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Failed to send message: ${e.toString()}'),
+            backgroundColor: Colors.red,
+            duration: const Duration(seconds: 5),
+          ),
+        );
+      }
+    } finally {
+      if (mounted) {
+        setState(() {
+          _isSending = false;
+        });
+      }
+    }
   }
 
   Future<void> _uploadFileWithCompression() async {
@@ -1214,79 +1775,6 @@ class _ChatScreenState extends State<ChatScreen> {
     }
   }
 
-  /// Download file dengan pilih lokasi simpan
-  Future<void> _downloadFileWithLocation(
-      Map<String, dynamic> fileMessage) async {
-    try {
-      final supabaseService = SupabaseService();
-      final fileName = fileMessage['file_name'] as String;
-
-      // Tampilkan modal pilih lokasi simpan
-      final selectedLocation = await showDialog<String>(
-        context: context,
-        builder: (context) => FileLocationModal(
-          fileName: fileName,
-          isUpload: false,
-        ),
-      );
-
-      if (selectedLocation == null) return;
-
-      setState(() {
-        _isUploading = true;
-      });
-
-      // Download dan simpan file
-      final savedFile = await supabaseService.downloadAndSaveFile(
-        filePath: fileMessage['file_path'] as String,
-        fileName: fileName,
-        locationType: selectedLocation,
-      );
-
-      if (mounted) {
-        showDialog(
-          context: context,
-          builder: (context) => AlertDialog(
-            title: const Text('File Downloaded'),
-            content: Text(
-              'File "$fileName" berhasil disimpan di:\n${savedFile.path}',
-            ),
-            actions: [
-              TextButton(
-                onPressed: () => Navigator.pop(context),
-                child: const Text('OK'),
-              ),
-              TextButton(
-                onPressed: () {
-                  Navigator.pop(context);
-                },
-                child: const Text('Buka Lokasi'),
-              ),
-            ],
-          ),
-        );
-      }
-    } catch (e) {
-      if (kDebugMode) {
-        debugPrint('❌ File download error: $e');
-      }
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('Gagal download file: ${e.toString()}'),
-            backgroundColor: Colors.red,
-          ),
-        );
-      }
-    } finally {
-      if (mounted) {
-        setState(() {
-          _isUploading = false;
-        });
-      }
-    }
-  }
-
   /// Show file info
   void _showFileInfo(Map<String, dynamic> fileMessage) {
     final fileName = fileMessage['file_name'] as String;
@@ -1389,10 +1877,133 @@ class _ChatScreenState extends State<ChatScreen> {
   }
 
   // ===============================
-  // ENHANCED FILE MESSAGE BUBBLE
+  // ENHANCED MESSAGE BUBBLE WITH COPY FEATURES
   // ===============================
 
-  /// Enhanced file message bubble dengan status yang jelas
+  /// Enhanced message bubble with copy functionality
+  Widget _buildMessageBubble(Map<String, dynamic> message, bool isMe) {
+    final messageText = message['message'] as String;
+    final time = _formatTime(message['created_at'] as String);
+
+    return Container(
+      margin: const EdgeInsets.symmetric(vertical: 4.0, horizontal: 16.0),
+      child: Row(
+        mainAxisAlignment:
+            isMe ? MainAxisAlignment.end : MainAxisAlignment.start,
+        crossAxisAlignment: CrossAxisAlignment.end,
+        children: [
+          if (!isMe) ...[
+            Container(
+              width: 32,
+              height: 32,
+              margin: const EdgeInsets.only(right: 8.0),
+              decoration: BoxDecoration(
+                color: Colors.grey[400],
+                shape: BoxShape.circle,
+              ),
+              child: const Icon(
+                Icons.person,
+                color: Colors.white,
+                size: 18,
+              ),
+            ),
+          ],
+          Flexible(
+            child: GestureDetector(
+              onTap: () {
+                // Single tap - show quick copy option
+                _copyMessageToClipboard(messageText);
+              },
+              onLongPress: () {
+                // Long press - show context menu
+                _showMessageContextMenu(message, isMe);
+              },
+              child: Container(
+                padding: const EdgeInsets.all(12.0),
+                constraints: BoxConstraints(
+                  maxWidth: MediaQuery.of(context).size.width * 0.75,
+                ),
+                decoration: BoxDecoration(
+                  color: isMe
+                      ? Theme.of(context).colorScheme.primary
+                      : Colors.grey[100],
+                  borderRadius: BorderRadius.only(
+                    topLeft: const Radius.circular(16.0),
+                    topRight: const Radius.circular(16.0),
+                    bottomLeft: isMe
+                        ? const Radius.circular(16.0)
+                        : const Radius.circular(4.0),
+                    bottomRight: isMe
+                        ? const Radius.circular(4.0)
+                        : const Radius.circular(16.0),
+                  ),
+                  boxShadow: [
+                    BoxShadow(
+                      color: Colors.black.withOpacity(0.1),
+                      blurRadius: 4.0,
+                      offset: const Offset(0, 2),
+                    ),
+                  ],
+                ),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      messageText,
+                      style: TextStyle(
+                        color: isMe ? Colors.white : Colors.grey[800],
+                        fontSize: 16.0,
+                        height: 1.3,
+                      ),
+                    ),
+                    const SizedBox(height: 4.0),
+                    Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Text(
+                          time,
+                          style: TextStyle(
+                            color: isMe ? Colors.white70 : Colors.grey[500],
+                            fontSize: 11.0,
+                          ),
+                        ),
+                        if (isMe) ...[
+                          const SizedBox(width: 4.0),
+                          Icon(
+                            Icons.done_all,
+                            size: 12,
+                            color: Colors.white70,
+                          ),
+                        ],
+                      ],
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          ),
+          if (isMe) ...[
+            Container(
+              width: 32,
+              height: 32,
+              margin: const EdgeInsets.only(left: 8.0),
+              decoration: BoxDecoration(
+                color: Theme.of(context).colorScheme.primary,
+                shape: BoxShape.circle,
+              ),
+              child: const Icon(
+                Icons.person,
+                color: Colors.white,
+                size: 18,
+              ),
+            ),
+          ],
+        ],
+      ),
+    );
+  }
+
+  /// Enhanced file message bubble dengan copy functionality
   Widget _buildEnhancedFileMessage(
       Map<String, dynamic> fileMessage, bool isMe) {
     final fileName = fileMessage['file_name'] as String;
@@ -1422,8 +2033,14 @@ class _ChatScreenState extends State<ChatScreen> {
           ],
           Flexible(
             child: GestureDetector(
-              onTap: () => _showFileOptions(fileMessage),
-              onLongPress: () => _showFileOptions(fileMessage),
+              onTap: () {
+                // Single tap - show file options
+                _showFileOptions(fileMessage);
+              },
+              onLongPress: () {
+                // Long press - show context menu dengan copy options
+                _showFileContextMenu(fileMessage, isMe);
+              },
               child: Container(
                 padding: const EdgeInsets.all(12.0),
                 constraints: BoxConstraints(
@@ -1557,122 +2174,6 @@ class _ChatScreenState extends State<ChatScreen> {
   }
 
   // ===============================
-  // MESSAGE BUBBLE WIDGETS
-  // ===============================
-
-  Widget _buildMessageBubble(Map<String, dynamic> message, bool isMe) {
-    final messageText = message['message'] as String;
-    final time = _formatTime(message['created_at'] as String);
-
-    return Container(
-      margin: const EdgeInsets.symmetric(vertical: 4.0, horizontal: 16.0),
-      child: Row(
-        mainAxisAlignment:
-            isMe ? MainAxisAlignment.end : MainAxisAlignment.start,
-        crossAxisAlignment: CrossAxisAlignment.end,
-        children: [
-          if (!isMe) ...[
-            Container(
-              width: 32,
-              height: 32,
-              margin: const EdgeInsets.only(right: 8.0),
-              decoration: BoxDecoration(
-                color: Colors.grey[400],
-                shape: BoxShape.circle,
-              ),
-              child: const Icon(
-                Icons.person,
-                color: Colors.white,
-                size: 18,
-              ),
-            ),
-          ],
-          Flexible(
-            child: Container(
-              padding: const EdgeInsets.all(12.0),
-              constraints: BoxConstraints(
-                maxWidth: MediaQuery.of(context).size.width * 0.75,
-              ),
-              decoration: BoxDecoration(
-                color: isMe
-                    ? Theme.of(context).colorScheme.primary
-                    : Colors.grey[100],
-                borderRadius: BorderRadius.only(
-                  topLeft: const Radius.circular(16.0),
-                  topRight: const Radius.circular(16.0),
-                  bottomLeft: isMe
-                      ? const Radius.circular(16.0)
-                      : const Radius.circular(4.0),
-                  bottomRight: isMe
-                      ? const Radius.circular(4.0)
-                      : const Radius.circular(16.0),
-                ),
-                boxShadow: [
-                  BoxShadow(
-                    color: Colors.black.withOpacity(0.1),
-                    blurRadius: 4.0,
-                    offset: const Offset(0, 2),
-                  ),
-                ],
-              ),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    messageText,
-                    style: TextStyle(
-                      color: isMe ? Colors.white : Colors.grey[800],
-                      fontSize: 16.0,
-                      height: 1.3,
-                    ),
-                  ),
-                  const SizedBox(height: 4.0),
-                  Row(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      Text(
-                        time,
-                        style: TextStyle(
-                          color: isMe ? Colors.white70 : Colors.grey[500],
-                          fontSize: 11.0,
-                        ),
-                      ),
-                      if (isMe) ...[
-                        const SizedBox(width: 4.0),
-                        Icon(
-                          Icons.done_all,
-                          size: 12,
-                          color: Colors.white70,
-                        ),
-                      ],
-                    ],
-                  ),
-                ],
-              ),
-            ),
-          ),
-          if (isMe) ...[
-            Container(
-              width: 32,
-              height: 32,
-              margin: const EdgeInsets.only(left: 8.0),
-              decoration: BoxDecoration(
-                color: Theme.of(context).colorScheme.primary,
-                shape: BoxShape.circle,
-              ),
-              child: const Icon(
-                Icons.person,
-                color: Colors.white,
-                size: 18,
-              ),
-            ),
-          ],
-        ],
-      ),
-    );
-  }
-
-  // ===============================
   // HELPER METHODS
   // ===============================
 
@@ -1746,6 +2247,8 @@ class _ChatScreenState extends State<ChatScreen> {
                       _uploadMultipleFiles();
                     } else if (value == 'demo_file') {
                       _uploadDemoFile();
+                    } else if (value == 'steganography') {
+                      _showSteganographyModal();
                     }
                   },
                   itemBuilder: (context) => [
@@ -1783,6 +2286,27 @@ class _ChatScreenState extends State<ChatScreen> {
                                 'Akan dikompresi menjadi ZIP',
                                 style:
                                     TextStyle(fontSize: 12, color: Colors.grey),
+                              ),
+                            ],
+                          ),
+                        ],
+                      ),
+                    ),
+                    const PopupMenuItem(
+                      value: 'steganography',
+                      child: Row(
+                        children: [
+                          Icon(Icons.visibility_off,
+                              size: 20, color: Colors.purple),
+                          SizedBox(width: 8),
+                          Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text('Hide Secret in Image'),
+                              Text(
+                                'Steganography LSB+DCT',
+                                style: TextStyle(
+                                    fontSize: 12, color: Colors.purple),
                               ),
                             ],
                           ),
@@ -2194,92 +2718,5 @@ class _ChatScreenState extends State<ChatScreen> {
         ),
       ),
     );
-  }
-
-  /// Copy message text to clipboard
-  void _copyMessageToClipboard(String messageText) {
-    try {
-      Clipboard.setData(ClipboardData(text: messageText));
-
-      // Show success feedback
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: const Text('Pesan disalin ke clipboard'),
-            backgroundColor: Colors.green,
-            duration: const Duration(seconds: 2),
-            behavior: SnackBarBehavior.floating,
-            action: SnackBarAction(
-              label: 'OK',
-              textColor: Colors.white,
-              onPressed: () {
-                ScaffoldMessenger.of(context).hideCurrentSnackBar();
-              },
-            ),
-          ),
-        );
-      }
-
-      if (kDebugMode) {
-        debugPrint('📋 Message copied to clipboard: "$messageText"');
-      }
-    } catch (e) {
-      if (kDebugMode) {
-        debugPrint('❌ Error copying message: $e');
-      }
-
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('Gagal menyalin pesan: ${e.toString()}'),
-            backgroundColor: Colors.red,
-          ),
-        );
-      }
-    }
-  }
-
-  /// Copy file info to clipboard
-  void _copyFileInfoToClipboard(Map<String, dynamic> fileMessage) {
-    try {
-      final fileName = fileMessage['file_name'] as String;
-      final fileSize = fileMessage['file_size'] as int;
-      final mimeType = fileMessage['mime_type'] as String;
-      final createdAt = fileMessage['created_at'] as String;
-
-      final supabaseService = SupabaseService();
-      final fileInfo =
-          supabaseService.getFileInfo(fileName, fileSize, mimeType);
-
-      final fileInfoText = '''
-File Information:
-📄 Name: $fileName
-📁 Type: ${fileInfo['category']}
-🔤 Extension: ${fileInfo['extension']}
-📊 Size: ${fileInfo['size_formatted']}
-🎯 MIME: $mimeType
-🕒 Created: ${_formatDateTime(createdAt)}
-''';
-
-      Clipboard.setData(ClipboardData(text: fileInfoText));
-
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: const Text('Info file disalin ke clipboard'),
-            backgroundColor: Colors.green,
-            duration: const Duration(seconds: 2),
-          ),
-        );
-      }
-
-      if (kDebugMode) {
-        debugPrint('📋 File info copied to clipboard');
-      }
-    } catch (e) {
-      if (kDebugMode) {
-        debugPrint('❌ Error copying file info: $e');
-      }
-    }
   }
 }
